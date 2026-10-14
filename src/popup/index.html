@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DOMGuard</title>
+    <link rel="stylesheet" href="./popup.css" />
+  </head>
+  <body>
+    <main class="w-80 p-4">
+      <h1 class="text-lg font-semibold text-slate-900">DOMGuard</h1>
+      <p class="mt-1 text-sm text-slate-600">Skeleton build — no feature logic yet.</p>
+      <!-- TODO: Wire these buttons to inject the content script and send messages. -->
+      <div class="mt-4 flex flex-col gap-2">
+        <button id="scan-and-mask" type="button" class="rounded bg-slate-900 px-3 py-2 text-sm text-white">
+          Scan &amp; Mask
+        </button>
+        <button id="toggle-picker" type="button" class="rounded border border-slate-300 px-3 py-2 text-sm">
+          Toggle Picker
+        </button>
+        <button id="sanitize-hidden" type="button" class="rounded border border-slate-300 px-3 py-2 text-sm">
+          Sanitize Hidden Text
+        </button>
+      </div>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
