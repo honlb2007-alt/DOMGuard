@@ -2,4 +2,9 @@ node_modules/
 dist/
 .DS_Store
 *.log
+npm-debug.log*
 .vite/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example

@@ -1,6 +1,8 @@
 # DOMGuard
 
-Manifest V3 Chrome extension skeleton (TypeScript + Vite + `@crxjs/vite-plugin` + Tailwind CSS). Feature logic is not implemented yet.
+Chrome extension for privacy masking and anti-prompt injection.
+
+This repository currently contains a Manifest V3 skeleton (TypeScript + Vite + `@crxjs/vite-plugin` + Tailwind CSS). Feature logic is not implemented yet.
 
 ## Setup
 
