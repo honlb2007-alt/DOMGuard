@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "DOMGuard",
-  "version": "0.1.0",
-  "description": "Scan, mask, and sanitize sensitive DOM content on the current tab.",
+  "name": "DOMGuard - Hide Secrets & Hidden AI Prompts",
+  "version": "1.0.0",
+  "description": "Hides API keys, emails, and other secrets in screenshots, and detects hidden text that can hijack AI.",
   "permissions": ["activeTab", "storage", "scripting"],
   "host_permissions": ["https://extensionpay.com/*"],
   "content_scripts": [

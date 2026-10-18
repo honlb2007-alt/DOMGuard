@@ -8,4 +8,7 @@ export default defineConfig({
       manifest,
     }),
   ],
+  build: {
+    sourcemap: false,
+  },
 });

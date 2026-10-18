@@ -9,6 +9,7 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: false,
     target: 'chrome111',
+    sourcemap: false,
     lib: {
       entry: 'src/content/index.ts',
       formats: ['iife'],

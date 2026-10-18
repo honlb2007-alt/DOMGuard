@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DOMGuard Privacy Policy</title>
+  <style>
+    body {
+      margin: 0;
+      background: #f7f5f2;
+      color: #1c1917;
+      font: 17px/1.55 Georgia, "Palatino Linotype", Palatino, serif;
+    }
+    main {
+      max-width: 38rem;
+      margin: 0 auto;
+      padding: 3rem 1.25rem 4rem;
+    }
+    h1 {
+      margin: 0 0 1.25rem;
+      font-size: 1.75rem;
+      line-height: 1.2;
+      font-weight: 600;
+    }
+    h2 {
+      margin: 1.75rem 0 0.5rem;
+      font-size: 1.05rem;
+      font-weight: 600;
+    }
+    p {
+      margin: 0 0 0.75rem;
+    }
+    ul {
+      margin: 0 0 0.75rem;
+      padding-left: 1.2rem;
+    }
+    li {
+      margin: 0.35rem 0;
+    }
+    a {
+      color: #1d4e89;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>DOMGuard Privacy Policy</h1>
+
+    <p>DOMGuard processes page content and screenshots in your browser. It does not upload them to any server.</p>
+
+    <p>DOMGuard does not save page content or screenshots. A sensitive-data scan keeps only the type and the position on the page, not the matched text.</p>
+    <p>Hidden-text detection shows, in the extension popup, a preview of at most 80 characters of the detected text for each item. Those previews exist only in memory while the popup is open. They disappear when the popup closes. They are not saved, and they are not sent outside the browser.</p>
+    <p>A screenshot is turned into a downloaded file from the popup. It is not written to the extension’s storage.</p>
+
+    <h2>Payments</h2>
+    <p>The only network communication is with ExtensionPay (extensionpay.com). It is used for Pro payment and for checking whether this install is paid. ExtensionPay and Stripe handle the payment. DOMGuard does not handle credit card information.</p>
+    <p>ExtensionPay saves a user record (including email and payment status), an API key, and the install time in the browser’s chrome.storage.sync. This is ExtensionPay’s own behavior. For information about its privacy, see <a href="https://extensionpay.com/">extensionpay.com</a>.</p>
+
+    <h2>Saved on this device</h2>
+    <p>DOMGuard saves the day’s free-screenshot count in chrome.storage.local. That record is a date and a count. Pro status is cached in memory only and is not written to disk.</p>
+
+    <h2>Permissions</h2>
+    <ul>
+      <li>activeTab — work on the tab where you opened DOMGuard, including a screenshot of the visible area.</li>
+      <li>scripting — inject DOMGuard’s script into that tab.</li>
+      <li>storage — save the day’s free-screenshot count, and let ExtensionPay save its entitlement record.</li>
+      <li>extensionpay.com — reach ExtensionPay for payment and Pro checks.</li>
+    </ul>
+
+    <h2>Contact</h2>
+    <p>[CONTACT EMAIL]</p>
+
+    <p>Effective date: [DATE]</p>
+  </main>
+</body>
+</html>
