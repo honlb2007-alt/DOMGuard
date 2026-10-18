@@ -2,35 +2,20 @@ import {
   MASK_STYLES,
   isProStatusChanged,
   sendToBackground,
-  toErrorResponse,
   type ExtensionMessage,
   type ExtensionResponse,
   type HiddenFindingReport,
   type HiddenReason,
   type MaskStyle,
-  type MessageType,
 } from '../shared/messages';
 
-/** Buttons whose message needs no payload beyond its type. */
-const SIMPLE_BUTTONS: ReadonlyArray<readonly [elementId: string, message: ExtensionMessage]> = [
-  ['clear-masks', { type: 'CLEAR_MASKS' }],
-  ['sanitize-before-capture', { type: 'SANITIZE_BEFORE_CAPTURE' }],
-  ['restore-after-capture', { type: 'RESTORE_AFTER_CAPTURE' }],
-  ['check-pro', { type: 'CHECK_PRO' }],
-];
-
 const PICKER_LABEL = 'Manual picker';
-
+const SCAN_LABEL = 'Auto Scan & Mask';
 const HIDDEN_TEXT_LABEL = 'Scan Hidden Text';
-
 const SCREENSHOT_LABEL = 'Safe Screenshot';
-
-/** Shown for any failure; internal error detail never reaches the popup. */
-const SCAN_FAILED_MESSAGE = 'Scan failed. Please try again.';
-
-const SCREENSHOT_FAILED_MESSAGE = 'Screenshot failed. Please try again.';
-
-/** Long lists make the popup unusable, so the rest is summarised. */
+const SCREENSHOT_LIMIT_LABEL = 'Daily limit reached';
+const GENERIC_ERROR = 'Something went wrong. Please try again.';
+const CLEANUP_NOTE = 'Hidden-text cleanup is a Pro feature';
 const MAX_LISTED_FINDINGS = 20;
 
 const REASON_LABELS: Record<HiddenReason, string> = {
@@ -43,15 +28,38 @@ const REASON_LABELS: Record<HiddenReason, string> = {
   clipped: 'Clipped',
 };
 
+const planBadge = document.getElementById('plan-badge');
+const quotaLine = document.getElementById('quota-line');
 const statusEl = document.getElementById('status');
+const cleanupNote = document.getElementById('free-cleanup-note');
 const styleSelect = document.getElementById('mask-style');
 const pickerButton = document.getElementById('toggle-picker');
 const findingsList = document.getElementById('hidden-text-findings');
+const upgradePanel = document.getElementById('upgrade-panel');
+
+/** Null until GET_STATUS returns. The worker, not this flag, allows a feature. */
+let knownPaid: boolean | null = null;
+let remaining = 0;
+let limit = 3;
+let upgradeDismissed = false;
+let upgradeTrigger: HTMLElement | null = null;
+let cleanupNoteShown = false;
+let screenshotBusy = false;
 
 function setStatus(text: string): void {
   if (statusEl) {
     statusEl.textContent = text;
   }
+}
+
+function button(elementId: string): HTMLButtonElement | null {
+  const element = document.getElementById(elementId);
+  return element instanceof HTMLButtonElement ? element : null;
+}
+
+function labelOf(element: HTMLButtonElement): HTMLElement {
+  const label = element.querySelector('.btn-label');
+  return label instanceof HTMLElement ? label : element;
 }
 
 function setPickerLabel(active: boolean): void {
@@ -65,9 +73,180 @@ function selectedStyle(): MaskStyle {
   return MASK_STYLES.find((style) => style === value) ?? 'black';
 }
 
-function formatValue(value: unknown): string {
-  const text = typeof value === 'string' ? value : JSON.stringify(value);
-  return text.length > 60 ? `${text.slice(0, 57)}…` : text;
+function isUpgradeError(response: ExtensionResponse): boolean {
+  return !response.ok && (response.error === 'PRO_REQUIRED' || response.error === 'QUOTA_EXCEEDED');
+}
+
+function createLockIcon(): SVGSVGElement {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.classList.add('lock');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute(
+    'd',
+    'M8 1.6a3.2 3.2 0 0 1 3.2 3.2V7H12a1 1 0 0 1 1 1v5.2a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h.8V4.8A3.2 3.2 0 0 1 8 1.6zm0 1.3a1.9 1.9 0 0 0-1.9 1.9V7h3.8V4.8A1.9 1.9 0 0 0 8 2.9z',
+  );
+  svg.append(path);
+  return svg;
+}
+
+function createProTag(): HTMLSpanElement {
+  const tag = document.createElement('span');
+  tag.className = 'pro-tag';
+  tag.textContent = 'Pro';
+  return tag;
+}
+
+/** Lock and Pro tag for a feature the last GET_STATUS reported as unpaid. */
+function ensureProMarks(element: HTMLButtonElement): HTMLElement {
+  const existing = element.querySelector('.pro-marks');
+  if (existing instanceof HTMLElement) {
+    return existing;
+  }
+  const marks = document.createElement('span');
+  marks.className = 'pro-marks';
+  marks.hidden = true;
+  marks.append(createLockIcon(), createProTag());
+  element.append(marks);
+  return marks;
+}
+
+function openUpgrade(trigger?: HTMLElement | null, focus = true): void {
+  if (knownPaid === true || !(upgradePanel instanceof HTMLElement)) {
+    return;
+  }
+  if (trigger) {
+    upgradeTrigger = trigger;
+  }
+  upgradeDismissed = false;
+  upgradePanel.hidden = false;
+  if (focus) {
+    button('upgrade')?.focus();
+  }
+}
+
+function closeUpgrade(): void {
+  if (!(upgradePanel instanceof HTMLElement)) {
+    return;
+  }
+  upgradeDismissed = true;
+  upgradePanel.hidden = true;
+  upgradeTrigger?.focus();
+}
+
+function revealCleanupNote(): void {
+  if (cleanupNoteShown || !(cleanupNote instanceof HTMLElement)) {
+    return;
+  }
+  cleanupNote.textContent = CLEANUP_NOTE;
+  cleanupNote.hidden = false;
+  cleanupNoteShown = true;
+}
+
+function renderPlan(): void {
+  const paid = knownPaid === true;
+  const unpaid = knownPaid === false;
+  if (planBadge) {
+    planBadge.textContent = paid ? 'Pro' : unpaid ? 'Free' : '…';
+    planBadge.classList.toggle('badge-pro', paid);
+  }
+  if (quotaLine) {
+    quotaLine.textContent = paid
+      ? 'Unlimited screenshots'
+      : unpaid
+        ? `${remaining} of ${limit} safe screenshots left today`
+        : 'Checking plan…';
+  }
+
+  for (const elementId of ['scan-and-mask', 'detect-hidden-text']) {
+    const element = button(elementId);
+    if (!element) {
+      continue;
+    }
+    ensureProMarks(element).hidden = !unpaid;
+  }
+
+  const screenshotButton = button('capture-screenshot');
+  if (screenshotButton) {
+    const exhausted = unpaid && remaining <= 0;
+    screenshotButton.disabled = screenshotBusy || exhausted;
+    labelOf(screenshotButton).textContent = screenshotBusy
+      ? 'Capturing…'
+      : exhausted
+        ? SCREENSHOT_LIMIT_LABEL
+        : SCREENSHOT_LABEL;
+  }
+
+  if (paid && upgradePanel instanceof HTMLElement) {
+    upgradePanel.hidden = true;
+  }
+  if (paid && cleanupNote instanceof HTMLElement) {
+    cleanupNote.hidden = true;
+  }
+  if (unpaid && remaining <= 0 && !upgradeDismissed) {
+    openUpgrade(null, false);
+  }
+}
+
+/** Paint the worker's latest paid flag and quota. This does not grant access. */
+async function refreshEntitlement(): Promise<void> {
+  try {
+    const response = await sendToBackground({ type: 'GET_STATUS' });
+    if (!response.ok) {
+      setStatus(GENERIC_ERROR);
+      return;
+    }
+    knownPaid = response.paid;
+    remaining = response.quota.remaining;
+    limit = response.quota.limit;
+    renderPlan();
+  } catch {
+    setStatus(GENERIC_ERROR);
+  }
+}
+
+function reasonLabel(finding: HiddenFindingReport): string {
+  const label = REASON_LABELS[finding.reason] ?? finding.reason;
+  if (finding.reason === 'low_contrast' && typeof finding.contrastRatio === 'number') {
+    return `${label} (ratio ${finding.contrastRatio.toFixed(2)})`;
+  }
+  return label;
+}
+
+function renderFindings(findings: HiddenFindingReport[]): void {
+  if (!findingsList) {
+    return;
+  }
+  const items: HTMLLIElement[] = [];
+  for (const finding of findings.slice(0, MAX_LISTED_FINDINGS)) {
+    const item = document.createElement('li');
+    item.className = 'finding';
+
+    const label = document.createElement('span');
+    label.className = 'finding-label';
+    label.textContent = reasonLabel(finding);
+
+    const preview = document.createElement('span');
+    preview.className = 'finding-preview';
+    preview.textContent = finding.preview;
+
+    item.append(label, preview);
+    items.push(item);
+  }
+
+  const extra = findings.length - items.length;
+  if (extra > 0) {
+    const more = document.createElement('li');
+    more.className = 'finding-more';
+    more.textContent = `and ${extra} more`;
+    items.push(more);
+  }
+  findingsList.replaceChildren(...items);
+}
+
+function clearFindings(): void {
+  findingsList?.replaceChildren();
 }
 
 /** `Email address 3, Credit card number 1` */
@@ -80,7 +259,7 @@ function tally(counts: Record<string, number>): string {
 
 function describeScan(response: ExtensionResponse & { ok: true }): string {
   if (!('byType' in response)) {
-    return 'SCAN_AND_MASK ok';
+    return 'Scan finished.';
   }
   if (response.count === 0) {
     return 'No sensitive data found.';
@@ -88,154 +267,35 @@ function describeScan(response: ExtensionResponse & { ok: true }): string {
   return `Found ${response.count} match(es): ${tally(response.byType)}`;
 }
 
-/** `Low contrast (ratio 1.02)` */
-function reasonLabel(finding: HiddenFindingReport): string {
-  const label = REASON_LABELS[finding.reason] ?? finding.reason;
-  if (finding.reason === 'low_contrast' && typeof finding.contrastRatio === 'number') {
-    return `${label} (ratio ${finding.contrastRatio.toFixed(2)})`;
-  }
-  return label;
-}
-
 /**
- * Render the findings list. Previews are untrusted page content, so every node
- * is built with createElement and every string assigned through textContent.
- * No markup is ever parsed here.
+ * Send a message. PRO_REQUIRED and QUOTA_EXCEEDED open the upgrade panel.
+ * Any other failure stays generic; the worker's error text is not shown.
  */
-function renderFindings(findings: HiddenFindingReport[]): void {
-  if (!findingsList) {
-    return;
-  }
-  const items: HTMLLIElement[] = [];
-  for (const finding of findings.slice(0, MAX_LISTED_FINDINGS)) {
-    const item = document.createElement('li');
-    item.className = 'rounded border border-slate-200 px-2 py-1';
-
-    const label = document.createElement('span');
-    label.className = 'block font-medium text-slate-800';
-    label.textContent = reasonLabel(finding);
-
-    const preview = document.createElement('span');
-    preview.className = 'block break-words text-slate-500';
-    preview.textContent = finding.preview;
-
-    item.append(label, preview);
-    items.push(item);
-  }
-
-  const remaining = findings.length - items.length;
-  if (remaining > 0) {
-    const more = document.createElement('li');
-    more.className = 'px-2 py-1 text-slate-500';
-    more.textContent = `and ${remaining} more`;
-    items.push(more);
-  }
-
-  // Replaces the previous results in one step, leaving nothing stale behind.
-  findingsList.replaceChildren(...items);
-}
-
-function clearFindings(): void {
-  findingsList?.replaceChildren();
-}
-
-function describe(type: MessageType, response: ExtensionResponse): string {
-  if (!response.ok) {
-    return `${type} failed: ${response.error}`;
-  }
-  if (type === 'SCAN_AND_MASK') {
-    return describeScan(response);
-  }
-  const detail = Object.entries(response)
-    .filter(([key]) => key !== 'ok')
-    .map(([key, value]) => `${key}=${formatValue(value)}`)
-    .join(', ');
-  return detail ? `${type} ok — ${detail}` : `${type} ok`;
-}
-
-/** Send a message, report the outcome in the status bar, and hand it back. */
 async function send(
   message: ExtensionMessage,
-  button?: HTMLButtonElement,
+  control?: HTMLButtonElement,
 ): Promise<ExtensionResponse> {
-  if (button) {
-    button.disabled = true;
+  if (control) {
+    control.disabled = true;
   }
-  setStatus(`${message.type}…`);
   try {
     const response = await sendToBackground(message);
-    setStatus(describe(message.type, response));
-    return response;
-  } catch (error) {
-    const response = toErrorResponse(error);
-    setStatus(describe(message.type, response));
-    return response;
-  } finally {
-    if (button) {
-      button.disabled = false;
+    if (isUpgradeError(response)) {
+      openUpgrade(control);
+      await refreshEntitlement();
+      return response;
     }
-  }
-}
-
-function button(elementId: string): HTMLButtonElement | null {
-  const element = document.getElementById(elementId);
-  return element instanceof HTMLButtonElement ? element : null;
-}
-
-for (const [elementId, message] of SIMPLE_BUTTONS) {
-  const element = button(elementId);
-  element?.addEventListener('click', () => {
-    void (async () => {
-      await send(message, element);
-      if (message.type === 'CLEAR_MASKS') {
-        // Clearing also tears down the picker, so keep the label honest.
-        setPickerLabel(false);
-      }
-    })();
-  });
-}
-
-/** Ask the service worker for the paid flag and today's remaining screenshots. */
-async function refreshEntitlement(): Promise<void> {
-  try {
-    const response = await sendToBackground({ type: 'GET_STATUS' });
     if (!response.ok) {
-      return;
+      setStatus(GENERIC_ERROR);
     }
-    setStatus(
-      response.paid
-        ? 'Pro active.'
-        : `Free — ${response.quota.remaining} screenshot(s) left today.`,
-    );
+    return response;
   } catch {
-    // Leave the current status in place when the worker cannot be reached.
-  }
-}
-
-/** Hidden-text scan: own handler because it renders a list, not a status line. */
-async function scanHiddenText(target: HTMLButtonElement): Promise<void> {
-  // Pro is decided in the service worker. This handler does not grant it.
-  target.disabled = true;
-  target.textContent = 'Scanning…';
-  clearFindings();
-  setStatus('Scanning for hidden text…');
-  try {
-    const response = await sendToBackground({ type: 'DETECT_HIDDEN_TEXT' });
-    if (!response.ok) {
-      setStatus(SCAN_FAILED_MESSAGE);
-      return;
-    }
-    setStatus(
-      response.count === 0
-        ? 'No hidden text found'
-        : `${response.count} hidden text item(s) detected`,
-    );
-    renderFindings(response.findings);
-  } catch {
-    setStatus(SCAN_FAILED_MESSAGE);
+    setStatus(GENERIC_ERROR);
+    return { ok: false, error: GENERIC_ERROR };
   } finally {
-    target.disabled = false;
-    target.textContent = HIDDEN_TEXT_LABEL;
+    if (control) {
+      control.disabled = false;
+    }
   }
 }
 
@@ -246,7 +306,6 @@ function screenshotFilename(now: Date): string {
   return `domguard-${date}-${time}.png`;
 }
 
-/** Start a download, then drop the anchor so the data URL is not left in the DOM. */
 function downloadDataUrl(dataUrl: string, filename: string): void {
   const link = document.createElement('a');
   link.href = dataUrl;
@@ -257,28 +316,98 @@ function downloadDataUrl(dataUrl: string, filename: string): void {
 }
 
 async function captureSafeScreenshot(target: HTMLButtonElement): Promise<void> {
-  target.disabled = true;
-  target.textContent = 'Capturing…';
+  if (target.disabled) {
+    return;
+  }
+  const wasUnpaid = knownPaid === false;
+  screenshotBusy = true;
+  renderPlan();
   setStatus('Capturing the visible area…');
   try {
     const response = await sendToBackground({ type: 'CAPTURE_SCREENSHOT' });
+    if (isUpgradeError(response)) {
+      openUpgrade(target);
+      await refreshEntitlement();
+      return;
+    }
     if (!response.ok || !response.dataUrl) {
-      setStatus(SCREENSHOT_FAILED_MESSAGE);
+      setStatus(GENERIC_ERROR);
       return;
     }
     downloadDataUrl(response.dataUrl, screenshotFilename(new Date()));
     setStatus('Screenshot downloaded.');
+    await refreshEntitlement();
+    if (wasUnpaid && knownPaid === false) {
+      revealCleanupNote();
+    }
   } catch {
-    setStatus(SCREENSHOT_FAILED_MESSAGE);
+    setStatus(GENERIC_ERROR);
   } finally {
-    target.disabled = false;
-    target.textContent = SCREENSHOT_LABEL;
+    screenshotBusy = false;
+    renderPlan();
   }
 }
 
-const screenshotButton = button('capture-screenshot');
-screenshotButton?.addEventListener('click', () => {
-  void captureSafeScreenshot(screenshotButton);
+async function scanHiddenText(target: HTMLButtonElement): Promise<void> {
+  // GET_STATUS already said unpaid, so show the upgrade panel instead of asking again.
+  if (knownPaid === false) {
+    openUpgrade(target);
+    return;
+  }
+  const label = labelOf(target);
+  target.disabled = true;
+  label.textContent = 'Scanning…';
+  clearFindings();
+  setStatus('Scanning for hidden text…');
+  try {
+    const response = await sendToBackground({ type: 'DETECT_HIDDEN_TEXT' });
+    if (isUpgradeError(response)) {
+      openUpgrade(target);
+      await refreshEntitlement();
+      return;
+    }
+    if (!response.ok) {
+      setStatus(GENERIC_ERROR);
+      return;
+    }
+    setStatus(
+      response.count === 0
+        ? 'No hidden text found'
+        : `${response.count} hidden text item(s) detected`,
+    );
+    renderFindings(response.findings);
+  } catch {
+    setStatus(GENERIC_ERROR);
+  } finally {
+    target.disabled = false;
+    label.textContent = HIDDEN_TEXT_LABEL;
+    renderPlan();
+  }
+}
+
+async function scanAndMask(target: HTMLButtonElement): Promise<void> {
+  if (knownPaid === false) {
+    openUpgrade(target);
+    return;
+  }
+  const label = labelOf(target);
+  target.disabled = true;
+  label.textContent = 'Scanning…';
+  try {
+    const response = await send({ type: 'SCAN_AND_MASK', style: selectedStyle() });
+    if (response.ok) {
+      setStatus(describeScan(response));
+    }
+  } finally {
+    target.disabled = false;
+    label.textContent = SCAN_LABEL;
+    renderPlan();
+  }
+}
+
+const scanButton = button('scan-and-mask');
+scanButton?.addEventListener('click', () => {
+  void scanAndMask(scanButton);
 });
 
 const hiddenTextButton = button('detect-hidden-text');
@@ -286,19 +415,63 @@ hiddenTextButton?.addEventListener('click', () => {
   void scanHiddenText(hiddenTextButton);
 });
 
-const scanButton = button('scan-and-mask');
-scanButton?.addEventListener('click', () => {
-  void send({ type: 'SCAN_AND_MASK', style: selectedStyle() }, scanButton);
+const screenshotButton = button('capture-screenshot');
+screenshotButton?.addEventListener('click', () => {
+  void captureSafeScreenshot(screenshotButton);
 });
 
-const pickerToggle = button('toggle-picker');
-pickerToggle?.addEventListener('click', () => {
+const clearButton = button('clear-masks');
+clearButton?.addEventListener('click', () => {
   void (async () => {
-    const response = await send({ type: 'TOGGLE_PICKER' }, pickerToggle);
+    const response = await send({ type: 'CLEAR_MASKS' }, clearButton);
+    if (response.ok) {
+      setPickerLabel(false);
+      clearFindings();
+      setStatus('Masks cleared.');
+    }
+  })();
+});
+
+pickerButton?.addEventListener('click', () => {
+  if (!(pickerButton instanceof HTMLButtonElement)) {
+    return;
+  }
+  void (async () => {
+    const response = await send({ type: 'TOGGLE_PICKER' }, pickerButton);
     if (response.ok && 'active' in response) {
       setPickerLabel(response.active);
     }
   })();
+});
+
+if (styleSelect instanceof HTMLSelectElement) {
+  styleSelect.addEventListener('change', () => {
+    void (async () => {
+      const response = await send({ type: 'UPDATE_MASK_STYLE', style: selectedStyle() });
+      if (response.ok) {
+        setStatus('Mask style updated.');
+      }
+    })();
+  });
+}
+
+button('upgrade')?.addEventListener('click', () => {
+  const upgradeButton = button('upgrade');
+  if (!upgradeButton) {
+    return;
+  }
+  void (async () => {
+    upgradeButton.disabled = true;
+    const response = await send({ type: 'OPEN_UPGRADE' }, upgradeButton);
+    if (response.ok) {
+      setStatus('Opening the payment page…');
+    }
+    upgradeButton.disabled = false;
+  })();
+});
+
+button('upgrade-dismiss')?.addEventListener('click', () => {
+  closeUpgrade();
 });
 
 chrome.runtime.onMessage.addListener((message: unknown) => {
@@ -307,8 +480,11 @@ chrome.runtime.onMessage.addListener((message: unknown) => {
   }
 });
 
-if (styleSelect instanceof HTMLSelectElement) {
-  styleSelect.addEventListener('change', () => {
-    void send({ type: 'UPDATE_MASK_STYLE', style: selectedStyle() });
-  });
+for (const elementId of ['scan-and-mask', 'detect-hidden-text']) {
+  const element = button(elementId);
+  if (element) {
+    ensureProMarks(element);
+  }
 }
+
+void refreshEntitlement();

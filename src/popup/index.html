@@ -7,50 +7,61 @@
     <link rel="stylesheet" href="./popup.css" />
   </head>
   <body>
-    <main class="w-80 p-4">
-      <h1 class="text-lg font-semibold text-slate-900">DOMGuard</h1>
-      <p class="mt-1 text-sm text-slate-600">Mask sensitive data on the current tab.</p>
-      <label class="mt-4 flex items-center justify-between gap-2 text-sm text-slate-700">
+    <main class="app">
+      <header class="header">
+        <div class="title-row">
+          <h1>DOMGuard</h1>
+          <span id="plan-badge" class="badge">…</span>
+        </div>
+        <p id="quota-line" class="quota">Checking plan…</p>
+      </header>
+
+      <label class="field">
         <span>Mask style</span>
-        <select id="mask-style" class="rounded border border-slate-300 px-2 py-1 text-sm">
+        <select id="mask-style">
           <option value="black">Solid black</option>
           <option value="blur">Blur</option>
         </select>
       </label>
-      <div class="mt-3 flex flex-col gap-2">
-        <button id="scan-and-mask" type="button" class="rounded bg-slate-900 px-3 py-2 text-sm text-white">
-          Scan &amp; Mask
+
+      <div class="actions">
+        <button id="scan-and-mask" type="button" class="btn">
+          <span class="btn-label">Auto Scan &amp; Mask</span>
         </button>
-        <button id="clear-masks" type="button" class="rounded border border-slate-300 px-3 py-2 text-sm">
-          Clear Masks
+        <button id="clear-masks" type="button" class="btn">Clear Masks</button>
+        <button id="toggle-picker" type="button" class="btn">Manual picker: off</button>
+        <button id="detect-hidden-text" type="button" class="btn">
+          <span class="btn-label">Scan Hidden Text</span>
         </button>
-        <button id="toggle-picker" type="button" class="rounded border border-slate-300 px-3 py-2 text-sm">
-          Manual picker: off
-        </button>
-        <button id="detect-hidden-text" type="button" class="rounded border border-slate-300 px-3 py-2 text-sm">
-          Scan Hidden Text
-        </button>
-        <button id="sanitize-before-capture" type="button" class="rounded border border-slate-300 px-3 py-2 text-sm">
-          Sanitize Before Capture
-        </button>
-        <button id="restore-after-capture" type="button" class="rounded border border-slate-300 px-3 py-2 text-sm">
-          Restore After Capture
-        </button>
-        <div>
-          <button id="capture-screenshot" type="button" class="w-full rounded border border-slate-300 px-3 py-2 text-sm">
-            Safe Screenshot
+        <div class="shot">
+          <button id="capture-screenshot" type="button" class="btn btn-primary">
+            <span class="btn-label">Safe Screenshot</span>
           </button>
-          <p class="mt-1 text-xs text-slate-500">Captures the visible area only.</p>
+          <p class="hint">Captures the visible area only.</p>
         </div>
-        <button id="check-pro" type="button" class="rounded border border-slate-300 px-3 py-2 text-sm">
-          Check Pro
-        </button>
       </div>
-      <p id="status" class="mt-4 min-h-10 rounded bg-slate-100 px-3 py-2 text-xs text-slate-700">
-        Ready.
-      </p>
+
+      <p id="status" class="status" role="status" aria-live="polite">Ready.</p>
+      <p id="free-cleanup-note" class="note" hidden>Hidden-text cleanup is a Pro feature</p>
       <!-- Filled only by main.ts, with createElement and textContent. -->
-      <ul id="hidden-text-findings" class="mt-2 flex flex-col gap-1 text-xs"></ul>
+      <ul id="hidden-text-findings" class="findings"></ul>
+
+      <section id="upgrade-panel" class="upgrade" hidden aria-labelledby="upgrade-title">
+        <h2 id="upgrade-title">Upgrade to DOMGuard Pro</h2>
+        <ul class="upgrade-points">
+          <li>Automatic sensitive data scan</li>
+          <li>Hidden text protection for AI screenshots</li>
+          <li>Unlimited safe screenshots</li>
+        </ul>
+        <p class="price">$4.99 one-time. No subscription.</p>
+        <div class="upgrade-actions">
+          <button id="upgrade" type="button" class="btn btn-primary">Upgrade</button>
+          <button id="upgrade-dismiss" type="button" class="btn">Not now</button>
+        </div>
+        <p class="fine">Payments are handled securely by ExtensionPay and Stripe.</p>
+      </section>
+
+      <p class="footer">All processing happens locally. No data is collected.</p>
     </main>
     <script type="module" src="./main.ts"></script>
   </body>
