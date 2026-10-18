@@ -53,7 +53,7 @@ function digitsOf(value: string): string {
 export const PATTERNS: readonly PatternDef[] = [
   {
     id: 'email',
-    label: '電子郵件',
+    label: 'Email address',
     // Each `(?:\.…)+` repetition must start with a literal dot, which the label
     // character class excludes, so there is nothing to backtrack over.
     regex: /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g,
@@ -64,19 +64,19 @@ export const PATTERNS: readonly PatternDef[] = [
   },
   {
     id: 'tw_mobile',
-    label: '台灣手機號碼',
+    label: 'Taiwan mobile number',
     // 09xx-xxx-xxx or +886-9xx-xxx-xxx, separators optional. The digit
     // boundaries stop this from matching a slice of a longer number.
     regex: /(?<![0-9])(?:\+886[- ]?|0)9[0-9]{2}[- ]?[0-9]{3}[- ]?[0-9]{3}(?![0-9])/g,
   },
   {
     id: 'intl_phone',
-    label: '國際電話號碼',
+    label: 'International phone number',
     regex: /(?<![0-9])\+(?:[0-9][- ]?){7,15}[0-9](?![0-9])/g,
   },
   {
     id: 'credit_card',
-    label: '信用卡號',
+    label: 'Credit card number',
     // 13-19 digits with optional single separators, confirmed by Luhn.
     regex: /(?<![0-9])(?:[0-9][ -]?){12,18}[0-9](?![0-9])/g,
     validate: (value) => {
@@ -91,28 +91,28 @@ export const PATTERNS: readonly PatternDef[] = [
   },
   {
     id: 'anthropic_key',
-    label: 'Anthropic API Key',
+    label: 'Anthropic API key',
     regex: /(?<![A-Za-z0-9_-])sk-ant-[A-Za-z0-9_-]{16,}/g,
   },
   {
     id: 'openai_key',
-    label: 'OpenAI API Key',
+    label: 'OpenAI API key',
     // The lookahead hands `sk-ant-…` over to the Anthropic pattern.
     regex: /(?<![A-Za-z0-9_-])sk-(?!ant-)[A-Za-z0-9_-]{16,}/g,
   },
   {
     id: 'aws_access_key',
-    label: 'AWS Access Key',
+    label: 'AWS access key',
     regex: /(?<![A-Z0-9])(?:AKIA|ASIA)[A-Z0-9]{16}(?![A-Z0-9])/g,
   },
   {
     id: 'github_token',
-    label: 'GitHub Token',
+    label: 'GitHub token',
     regex: /(?<![A-Za-z0-9_])(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})/g,
   },
   {
     id: 'stripe_key',
-    label: 'Stripe API Key',
+    label: 'Stripe API key',
     regex: /(?<![A-Za-z0-9_])(?:sk_live|sk_test|rk_live|pk_live)_[A-Za-z0-9]{10,}/g,
   },
 ];

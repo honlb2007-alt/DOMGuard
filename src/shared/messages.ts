@@ -81,19 +81,40 @@ export interface TogglePickerResponse {
   active: boolean;
 }
 
+/**
+ * Why a piece of text counts as hidden. Declared here rather than in the
+ * content script because it travels across the message boundary.
+ */
+export type HiddenReason =
+  | 'low_contrast'
+  | 'tiny_font'
+  | 'transparent'
+  | 'hidden_visibility'
+  | 'zero_size'
+  | 'offscreen'
+  | 'clipped';
+
+/** A finding without its element, so it can cross the message boundary. */
+export interface HiddenFindingReport {
+  preview: string;
+  reason: HiddenReason;
+  contrastRatio?: number;
+}
+
 export interface DetectHiddenTextResponse {
   ok: true;
-  hiddenCount: number;
+  count: number;
+  findings: HiddenFindingReport[];
 }
 
 export interface SanitizeBeforeCaptureResponse {
   ok: true;
-  sanitizedCount: number;
+  hiddenCount: number;
 }
 
 export interface RestoreAfterCaptureResponse {
   ok: true;
-  restoredCount: number;
+  hiddenCount: number;
 }
 
 export interface CaptureScreenshotResponse {

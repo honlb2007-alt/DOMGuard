@@ -38,7 +38,7 @@ describe('luhnValid', () => {
 
 describe('findSensitive — per type', () => {
   it('finds email addresses', () => {
-    expect(idsIn('寄到 test.user@example.com 謝謝')).toEqual(['email']);
+    expect(idsIn('send it to test.user@example.com thanks')).toEqual(['email']);
     expect(idsIn('qa+domguard@example.org')).toEqual(['email']);
     expect(idsIn('a.b@mail.co.uk')).toEqual(['email']);
   });
@@ -47,14 +47,14 @@ describe('findSensitive — per type', () => {
     expect(idsIn('user@localhost')).toEqual([]);
     expect(idsIn('user@example.c')).toEqual([]);
     expect(idsIn('user@example.12')).toEqual([]);
-    expect(idsIn('@mention 與 a@b')).toEqual([]);
+    expect(idsIn('@mention and a@b')).toEqual([]);
   });
 
   it('finds Taiwan mobile numbers with any separator', () => {
     expect(idsIn('0912-345-678')).toEqual(['tw_mobile']);
     expect(idsIn('0912 345 678')).toEqual(['tw_mobile']);
     expect(idsIn('0912345678')).toEqual(['tw_mobile']);
-    expect(idsIn('請回電 0987-654-321。')).toEqual(['tw_mobile']);
+    expect(idsIn('please call back on 0987-654-321.')).toEqual(['tw_mobile']);
   });
 
   it('prefers the Taiwan pattern for +886 numbers', () => {
@@ -71,12 +71,12 @@ describe('findSensitive — per type', () => {
     expect(idsIn('4242 4242 4242 4242')).toEqual(['credit_card']);
     expect(idsIn('4242-4242-4242-4242')).toEqual(['credit_card']);
     expect(idsIn('5555555555554444')).toEqual(['credit_card']);
-    expect(idsIn('卡號 4000056655665556 已失效')).toEqual(['credit_card']);
+    expect(idsIn('card 4000056655665556 expired')).toEqual(['credit_card']);
   });
 
   it('skips card-shaped numbers that fail Luhn', () => {
     expect(idsIn('4242 4242 4242 4241')).toEqual([]);
-    expect(idsIn('訂單編號 2024031500012345')).toEqual([]);
+    expect(idsIn('order number 2024031500012345')).toEqual([]);
   });
 
   it('finds JWTs', () => {
@@ -93,7 +93,7 @@ describe('findSensitive — per type', () => {
   });
 
   it('does not treat a bare sk- prefix as a key', () => {
-    expect(idsIn('前綴 sk- 本身不是金鑰')).toEqual([]);
+    expect(idsIn('the sk- prefix alone is not a key')).toEqual([]);
     expect(idsIn('sk-short')).toEqual([]);
   });
 
@@ -122,14 +122,14 @@ describe('findSensitive — overlap handling', () => {
     // Luhn-valid card, so the card wins.
     const matches = findSensitive('0912-345-678-9016');
     expect(matches).toEqual([
-      { id: 'credit_card', label: '信用卡號', start: 0, end: 17 },
+      { id: 'credit_card', label: 'Credit card number', start: 0, end: 17 },
     ]);
   });
 
   it('drops a match fully covered by an earlier one', () => {
     // The digits are part of the email local-part, not a phone number.
     const matches = findSensitive('a0912345678@example.com');
-    expect(matches).toEqual([{ id: 'email', label: '電子郵件', start: 0, end: 23 }]);
+    expect(matches).toEqual([{ id: 'email', label: 'Email address', start: 0, end: 23 }]);
   });
 
   it('never reports a phone number inside a credit card number', () => {
@@ -138,7 +138,7 @@ describe('findSensitive — overlap handling', () => {
   });
 
   it('returns matches sorted by start offset', () => {
-    const text = '信件 test.user@example.com 電話 0912-345-678 卡號 4242 4242 4242 4242';
+    const text = 'mail test.user@example.com phone 0912-345-678 card 4242 4242 4242 4242';
     const matches = findSensitive(text);
     expect(matches.map((match) => match.id)).toEqual(['email', 'tw_mobile', 'credit_card']);
     for (let i = 1; i < matches.length; i += 1) {
@@ -147,7 +147,7 @@ describe('findSensitive — overlap handling', () => {
   });
 
   it('reports offsets that map back to the original text', () => {
-    const text = '請洽 0912-345-678 查詢';
+    const text = 'call 0912-345-678 to ask';
     const [match] = findSensitive(text);
     expect(text.slice(match.start, match.end)).toBe('0912-345-678');
   });
@@ -155,9 +155,9 @@ describe('findSensitive — overlap handling', () => {
 
 describe('findSensitive — safety', () => {
   it('does not flag ordinary prose', () => {
-    expect(idsIn('今天天氣很好，我們下午三點在 101 的二樓咖啡廳碰面。')).toEqual([]);
+    expect(idsIn('Nice weather today, see you at 3pm in the cafe on floor 101.')).toEqual([]);
     expect(idsIn('The quick brown fox jumps over the lazy dog, 12 times.')).toEqual([]);
-    expect(idsIn('版本 1.2.3 於 2024-03-15 發布，市話 02-2345-6789。')).toEqual([]);
+    expect(idsIn('Version 1.2.3 shipped on 2024-03-15, landline 02-2345-6789.')).toEqual([]);
     expect(idsIn('')).toEqual([]);
   });
 
@@ -170,7 +170,7 @@ describe('findSensitive — safety', () => {
   });
 
   it('is repeatable, so shared regex state does not leak between calls', () => {
-    const text = 'test.user@example.com 與 0912-345-678';
+    const text = 'test.user@example.com and 0912-345-678';
     const first = findSensitive(text);
     expect(findSensitive(text)).toEqual(first);
     expect(findSensitive(text)).toEqual(first);
@@ -178,7 +178,7 @@ describe('findSensitive — safety', () => {
 
   it('scans 40k characters in well under 500ms', () => {
     const paragraph =
-      '客服紀錄：請寄到 test.user@example.com，或撥 0912-345-678 聯絡。訂單 2024031500012345 已出貨，備註無。';
+      'Support log: mail the receipt to test.user@example.com, or call 0912-345-678. Order 2024031500012345 has shipped, no further notes.';
     let text = '';
     while (text.length < 40_000) {
       text += paragraph;

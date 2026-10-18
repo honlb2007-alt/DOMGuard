@@ -18,7 +18,7 @@ const SIMPLE_BUTTONS: ReadonlyArray<readonly [elementId: string, message: Extens
   ['check-pro', { type: 'CHECK_PRO' }],
 ];
 
-const PICKER_LABEL = '手動選取遮蔽';
+const PICKER_LABEL = 'Manual picker';
 
 const statusEl = document.getElementById('status');
 const styleSelect = document.getElementById('mask-style');
@@ -32,7 +32,7 @@ function setStatus(text: string): void {
 
 function setPickerLabel(active: boolean): void {
   if (pickerButton) {
-    pickerButton.textContent = `${PICKER_LABEL}：${active ? '啟用中' : '關閉'}`;
+    pickerButton.textContent = `${PICKER_LABEL}: ${active ? 'on' : 'off'}`;
   }
 }
 
@@ -46,18 +46,37 @@ function formatValue(value: unknown): string {
   return text.length > 60 ? `${text.slice(0, 57)}…` : text;
 }
 
+/** `Email address 3, Credit card number 1` */
+function tally(counts: Record<string, number>): string {
+  return Object.entries(counts)
+    .sort(([, a], [, b]) => b - a)
+    .map(([label, count]) => `${label} ${count}`)
+    .join(', ');
+}
+
 function describeScan(response: ExtensionResponse & { ok: true }): string {
-  if (!('count' in response)) {
+  if (!('byType' in response)) {
     return 'SCAN_AND_MASK ok';
   }
   if (response.count === 0) {
-    return '沒有找到敏感資訊';
+    return 'No sensitive data found.';
   }
-  const breakdown = Object.entries(response.byType)
-    .sort(([, a], [, b]) => b - a)
-    .map(([label, count]) => `${label} ${count}`)
-    .join('、');
-  return `找到 ${response.count} 處敏感資訊：${breakdown}`;
+  return `Found ${response.count} match(es): ${tally(response.byType)}`;
+}
+
+function describeHiddenText(response: ExtensionResponse & { ok: true }): string {
+  if (!('findings' in response)) {
+    return 'DETECT_HIDDEN_TEXT ok';
+  }
+  if (response.count === 0) {
+    return 'No hidden text found.';
+  }
+  // Previews hold page text, so the status bar reports reasons only.
+  const byReason: Record<string, number> = {};
+  for (const finding of response.findings) {
+    byReason[finding.reason] = (byReason[finding.reason] ?? 0) + 1;
+  }
+  return `Found ${response.count} hidden text element(s): ${tally(byReason)}`;
 }
 
 function describe(type: MessageType, response: ExtensionResponse): string {
@@ -66,6 +85,9 @@ function describe(type: MessageType, response: ExtensionResponse): string {
   }
   if (type === 'SCAN_AND_MASK') {
     return describeScan(response);
+  }
+  if (type === 'DETECT_HIDDEN_TEXT') {
+    return describeHiddenText(response);
   }
   const detail = Object.entries(response)
     .filter(([key]) => key !== 'ok')

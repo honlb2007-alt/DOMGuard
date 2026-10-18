@@ -2,8 +2,12 @@
 // chrome.scripting.executeScript (activeTab), never through manifest
 // content_scripts.
 
-import './hidden-text';
-
+import {
+  detectHiddenText,
+  restoreAfterCapture as restoreHiddenText,
+  sanitizeBeforeCapture as hideHiddenText,
+  sanitizedCount,
+} from './hidden-text';
 import {
   applyMasks,
   clearMasks as clearAllMasks,
@@ -68,19 +72,25 @@ function togglePicker(): ResponseFor<'TOGGLE_PICKER'> {
   return { ok: true, active: toggleElementPicker() };
 }
 
-function detectHiddenText(): ResponseFor<'DETECT_HIDDEN_TEXT'> {
-  // TODO (Task B): walk the DOM for off-screen / transparent / clipped text.
-  return { ok: true, hiddenCount: 0 };
+function reportHiddenText(): ResponseFor<'DETECT_HIDDEN_TEXT'> {
+  // Element references cannot cross the message boundary, so only the
+  // serialisable part of each finding is reported.
+  const findings = detectHiddenText().map((finding) => ({
+    preview: finding.preview,
+    reason: finding.reason,
+    contrastRatio: finding.contrastRatio,
+  }));
+  return { ok: true, count: findings.length, findings };
 }
 
 function sanitizeBeforeCapture(): ResponseFor<'SANITIZE_BEFORE_CAPTURE'> {
-  // TODO (Task B): neutralize hidden text so it cannot leak into a screenshot.
-  return { ok: true, sanitizedCount: 0 };
+  return { ok: true, hiddenCount: hideHiddenText() };
 }
 
 function restoreAfterCapture(): ResponseFor<'RESTORE_AFTER_CAPTURE'> {
-  // TODO (Task B): undo sanitizeBeforeCapture once the capture is done.
-  return { ok: true, restoredCount: 0 };
+  const hiddenCount = sanitizedCount();
+  restoreHiddenText();
+  return { ok: true, hiddenCount };
 }
 
 async function handleMessage(message: ExtensionMessage): Promise<ExtensionResponse> {
@@ -94,7 +104,7 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
     case 'TOGGLE_PICKER':
       return togglePicker();
     case 'DETECT_HIDDEN_TEXT':
-      return detectHiddenText();
+      return reportHiddenText();
     case 'SANITIZE_BEFORE_CAPTURE':
       return sanitizeBeforeCapture();
     case 'RESTORE_AFTER_CAPTURE':

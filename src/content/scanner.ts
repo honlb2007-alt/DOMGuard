@@ -25,7 +25,7 @@ export interface PageMatch {
   target: MaskTarget;
 }
 
-export const PASSWORD_FIELD = { id: 'password_field', label: '密碼欄位' } as const;
+export const PASSWORD_FIELD = { id: 'password_field', label: 'Password field' } as const;
 
 /** Nodes handled per batch before yielding back to the browser. */
 const BATCH_SIZE = 200;
