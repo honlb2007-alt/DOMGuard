@@ -6,6 +6,18 @@ On a Pro install, **Auto Scan & Mask** covers secrets such as API keys, email ad
 
 Scanning, masking, and the pixel pass run in the browser. DOMGuard does not upload page text or screenshots.
 
+## Scope and limitations
+
+DOMGuard only works on web pages inside Chrome and other Chromium-based browsers. It cannot process other desktop apps, including terminals, editors, chat apps, and Office.
+
+Chrome does not allow extensions to run on `chrome://` pages, the Chrome Web Store, the New Tab page, or the built-in PDF viewer. On those pages the popup reports that Chrome blocks extensions there.
+
+Screenshots capture only the visible area of the current tab. They do not include the browser UI, other tabs, or other windows.
+
+Protect Mode only handles hidden text on the page. It does not process a screen recording or a screenshot after the fact.
+
+Detection is best-effort. It cannot guarantee that every secret or every hidden instruction is found.
+
 ## Permissions
 
 | Permission | Why it is needed |

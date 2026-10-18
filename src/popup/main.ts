@@ -9,6 +9,13 @@ import {
   type HiddenReason,
   type MaskStyle,
 } from '../shared/messages';
+import { isBlockedPageUrl } from './page-access';
+import {
+  downloadHeldCapture,
+  reduceCaptureHold,
+  statusAfterClipboardFailure,
+  type CaptureHold,
+} from './saved-capture';
 
 const PICKER_LABEL = 'Manual picker';
 const SCAN_LABEL = 'Auto Scan & Mask';
@@ -17,9 +24,10 @@ const SCREENSHOT_LABEL = 'Safe Screenshot';
 const SCREENSHOT_LIMIT_LABEL = 'Daily limit reached';
 const COPY_LABEL = 'Copy';
 const COPIED_LABEL = 'Copied';
-const COPY_FAILED = 'Could not copy. Try Download instead.';
+const DOWNLOAD_LABEL = 'Download';
 const COPIED_VISIBLE_MS = 1600;
 const GENERIC_ERROR = 'Something went wrong. Please try again.';
+const PAGE_BLOCKED = "DOMGuard can't run on this page. Chrome blocks extensions here.";
 const CLEANUP_NOTE = 'Hidden-text cleanup is a Pro feature';
 const MAX_LISTED_FINDINGS = 20;
 
@@ -50,9 +58,14 @@ let upgradeDismissed = false;
 let upgradeTrigger: HTMLElement | null = null;
 let cleanupNoteShown = false;
 let screenshotBusy = false;
+/** Chrome will not inject into this tab. ActiveTab supplied the URL. */
+let pageBlocked = false;
 /** Holds the Copy button on "Copied" until the timer clears it. */
 let copyLabelOverride: string | null = null;
 let copyResetTimer = 0;
+/** Last successful screenshot. Lives only until the next capture or popup close. */
+let heldCapture: CaptureHold = null;
+let popupClosed = false;
 
 function setStatus(text: string): void {
   if (statusEl) {
@@ -198,6 +211,13 @@ function renderPlan(): void {
     copyButton.disabled = screenshotBusy || exhausted;
     labelOf(copyButton).textContent = copyLabelOverride ?? COPY_LABEL;
   }
+  const downloadButton = button('download-capture');
+  if (downloadButton) {
+    const saved = downloadHeldCapture(heldCapture);
+    downloadButton.hidden = saved.dataUrl === null;
+    downloadButton.disabled = screenshotBusy || saved.dataUrl === null;
+    labelOf(downloadButton).textContent = DOWNLOAD_LABEL;
+  }
 
   if (paid && upgradePanel instanceof HTMLElement) {
     upgradePanel.hidden = true;
@@ -208,6 +228,36 @@ function renderPlan(): void {
   if (unpaid && remaining <= 0 && !upgradeDismissed) {
     openUpgrade(null, false);
   }
+  if (pageBlocked) {
+    lockBlockedPage();
+  }
+}
+
+const INJECTION_CONTROL_IDS = [
+  'scan-and-mask',
+  'clear-masks',
+  'toggle-picker',
+  'detect-hidden-text',
+  'capture-screenshot',
+  'copy-screenshot',
+];
+
+/** Disable controls that would inject into a page Chrome does not allow. */
+function lockBlockedPage(): void {
+  for (const elementId of INJECTION_CONTROL_IDS) {
+    const element = button(elementId);
+    if (element) {
+      element.disabled = true;
+    }
+  }
+  if (styleSelect instanceof HTMLSelectElement) {
+    styleSelect.disabled = true;
+  }
+  const protect = document.getElementById('protect-mode');
+  if (protect instanceof HTMLInputElement) {
+    protect.disabled = true;
+  }
+  setStatus(PAGE_BLOCKED);
 }
 
 /** Paint the worker's latest paid flag and quota. This does not grant access. */
@@ -361,11 +411,24 @@ function showCopied(target: HTMLButtonElement): void {
   }, COPIED_VISIBLE_MS);
 }
 
+function dropHeldCapture(): void {
+  heldCapture = reduceCaptureHold(heldCapture, { type: 'screenshot-started' });
+}
+
+function keepCapture(dataUrl: string): void {
+  if (popupClosed) {
+    heldCapture = reduceCaptureHold(heldCapture, { type: 'popup-closed' });
+    return;
+  }
+  heldCapture = reduceCaptureHold(heldCapture, { type: 'screenshot-succeeded', dataUrl });
+}
+
 async function captureSafeScreenshot(target: HTMLButtonElement): Promise<void> {
   if (target.disabled) {
     return;
   }
   const wasUnpaid = knownPaid === false;
+  dropHeldCapture();
   screenshotBusy = true;
   renderPlan();
   setStatus('Capturing the visible area…');
@@ -377,16 +440,24 @@ async function captureSafeScreenshot(target: HTMLButtonElement): Promise<void> {
       return;
     }
     if (!response.ok || !response.dataUrl) {
+      heldCapture = reduceCaptureHold(heldCapture, { type: 'screenshot-failed' });
       setStatus(GENERIC_ERROR);
       return;
     }
-    downloadDataUrl(response.dataUrl, screenshotFilename(new Date()));
+    keepCapture(response.dataUrl);
+    const saved = downloadHeldCapture(heldCapture);
+    if (!saved.dataUrl) {
+      setStatus(GENERIC_ERROR);
+      return;
+    }
+    downloadDataUrl(saved.dataUrl, screenshotFilename(new Date()));
     setStatus('Screenshot downloaded.');
     await refreshEntitlement();
     if (wasUnpaid && knownPaid === false) {
       revealCleanupNote();
     }
   } catch {
+    heldCapture = reduceCaptureHold(heldCapture, { type: 'screenshot-failed' });
     setStatus(GENERIC_ERROR);
   } finally {
     screenshotBusy = false;
@@ -478,6 +549,7 @@ copyButton?.addEventListener('click', () => {
   copyLabelOverride = null;
   window.clearTimeout(copyResetTimer);
   copyResetTimer = 0;
+  dropHeldCapture();
   screenshotBusy = true;
   renderPlan();
   setStatus('Capturing the visible area…');
@@ -493,7 +565,13 @@ copyButton?.addEventListener('click', () => {
       shotFailed = 'capture';
       throw new Error('capture');
     }
-    return dataUrlToPngBlob(response.dataUrl);
+    keepCapture(response.dataUrl);
+    const saved = downloadHeldCapture(heldCapture);
+    if (!saved.dataUrl) {
+      shotFailed = 'capture';
+      throw new Error('capture');
+    }
+    return dataUrlToPngBlob(saved.dataUrl);
   })();
 
   const writePromise = navigator.clipboard.write([
@@ -503,6 +581,7 @@ copyButton?.addEventListener('click', () => {
   void (async () => {
     try {
       await writePromise;
+      heldCapture = reduceCaptureHold(heldCapture, { type: 'copy-succeeded' });
       showCopied(copyButton);
       setStatus('Copied.');
       await refreshEntitlement();
@@ -511,18 +590,37 @@ copyButton?.addEventListener('click', () => {
       }
     } catch {
       if (shotFailed === 'upgrade') {
+        heldCapture = reduceCaptureHold(heldCapture, { type: 'screenshot-failed' });
         openUpgrade(copyButton);
         await refreshEntitlement();
       } else if (shotFailed === 'capture') {
+        heldCapture = reduceCaptureHold(heldCapture, { type: 'screenshot-failed' });
         setStatus(GENERIC_ERROR);
       } else {
-        setStatus(COPY_FAILED);
+        heldCapture = reduceCaptureHold(heldCapture, { type: 'copy-failed' });
+        setStatus(statusAfterClipboardFailure(heldCapture) ?? GENERIC_ERROR);
+        await refreshEntitlement();
       }
     } finally {
       screenshotBusy = false;
       renderPlan();
     }
   })();
+});
+
+const downloadButton = button('download-capture');
+downloadButton?.addEventListener('click', () => {
+  const saved = downloadHeldCapture(heldCapture);
+  if (!saved.dataUrl || downloadButton.disabled || screenshotBusy) {
+    return;
+  }
+  downloadDataUrl(saved.dataUrl, screenshotFilename(new Date()));
+  setStatus('Screenshot downloaded.');
+});
+
+window.addEventListener('pagehide', () => {
+  popupClosed = true;
+  heldCapture = reduceCaptureHold(heldCapture, { type: 'popup-closed' });
 });
 
 const clearButton = button('clear-masks');
@@ -658,11 +756,29 @@ protectToggle()?.addEventListener('change', () => {
       input.checked = !wantOn;
       setStatus(GENERIC_ERROR);
     } finally {
-      input.disabled = false;
+      input.disabled = pageBlocked;
       protectBusy = false;
     }
   })();
 });
 
-void refreshEntitlement();
-void refreshProtect();
+async function refreshPageAccess(): Promise<void> {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const url = typeof tab?.url === 'string' ? tab.url : null;
+    pageBlocked = url !== null && isBlockedPageUrl(url);
+  } catch {
+    pageBlocked = false;
+  }
+  if (pageBlocked) {
+    lockBlockedPage();
+  }
+}
+
+void (async () => {
+  await refreshPageAccess();
+  await refreshEntitlement();
+  if (!pageBlocked) {
+    await refreshProtect();
+  }
+})();

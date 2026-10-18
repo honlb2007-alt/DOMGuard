@@ -17,12 +17,10 @@ import {
   updateMaskStyle,
 } from './masker';
 import {
-  concealProtectBadgeForCapture,
   disableProtectMode,
   enableProtectMode,
   isProtectModeActive,
   protectModeState,
-  revealProtectBadgeAfterCapture,
 } from './protect';
 import { stopPicker, togglePicker as toggleElementPicker } from './picker';
 import { scanPage, type PageMatch } from './scanner';
@@ -105,9 +103,8 @@ function nextFrame(): Promise<void> {
 
 async function sanitizeBeforeCapture(): Promise<ResponseFor<'SANITIZE_BEFORE_CAPTURE'>> {
   // DOMGuard masks live in a closed shadow host outside the scanned tree, so
-  // they stay painted. The screenshot is supposed to show them. The Protect
-  // Mode mark is ours, so it is taken out of this capture only.
-  concealProtectBadgeForCapture();
+  // they stay painted. The screenshot is supposed to show them. Protect Mode
+  // does not add a page element.
   const hiddenCount = hideHiddenText();
   // The first frame applies the visibility change; the second runs only after
   // that frame has painted, so captureVisibleTab cannot race the old pixels.
@@ -123,7 +120,6 @@ function restoreAfterCapture(): ResponseFor<'RESTORE_AFTER_CAPTURE'> {
   if (!isProtectModeActive()) {
     restoreHiddenText();
   }
-  revealProtectBadgeAfterCapture();
   return { ok: true, hiddenCount };
 }
 

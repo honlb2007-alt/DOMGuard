@@ -324,6 +324,9 @@ select:focus-visible {
 }
 
 .footer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   margin-top: auto;
   border-top: 1px solid var(--line);
   padding-top: 10px;
@@ -331,6 +334,7 @@ select:focus-visible {
 
 .upgrade[hidden],
 .pro-marks[hidden],
-.note[hidden] {
+.note[hidden],
+#download-capture[hidden] {
   display: none;
 }

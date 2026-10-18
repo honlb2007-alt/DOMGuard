@@ -218,12 +218,22 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
       } catch {
         return { ok: false, error: 'PROTECT_UNAVAILABLE' };
       }
-    case 'DISABLE_PROTECT':
+    case 'DISABLE_PROTECT': {
+      let tabId: number | undefined;
       try {
-        return (await sendIfInjected(message)) ?? { ok: true, active: false };
+        tabId = await getActiveTabId();
+        const response = (await sendIfInjected(message)) ?? { ok: true as const, active: false };
+        if (!response.ok || !response.active) {
+          await writeProtectBadge(tabId, false);
+        }
+        return response;
       } catch {
+        if (tabId !== undefined) {
+          await writeProtectBadge(tabId, false);
+        }
         return { ok: true, active: false };
       }
+    }
     case 'GET_PROTECT_STATE':
       try {
         return (await sendIfInjected(message)) ?? { ok: true, active: false };
@@ -270,12 +280,70 @@ extpay.onPaid.addListener(() => {
   })();
 });
 
+const PROTECT_PORT = 'domguard-protect';
+const PROTECT_BADGE_ON = 'ON';
+const PROTECT_BADGE_BACKGROUND = '#E2B15A';
+const PROTECT_BADGE_TEXT = '#101114';
+
+/** Tabs whose content script still holds a Protect Mode port. */
+const protectPorts = new Map<number, chrome.runtime.Port>();
+
+/** Toolbar badge only. The text is the on/off flag, never anything from the page. */
+async function writeProtectBadge(tabId: number, active: boolean): Promise<void> {
+  try {
+    await chrome.action.setBadgeText({ tabId, text: active ? PROTECT_BADGE_ON : '' });
+    if (!active) {
+      return;
+    }
+    await chrome.action.setBadgeBackgroundColor({ tabId, color: PROTECT_BADGE_BACKGROUND });
+    await chrome.action.setBadgeTextColor({ tabId, color: PROTECT_BADGE_TEXT });
+  } catch {
+    // The tab can close before the badge update lands.
+  }
+}
+
+function trackProtectPort(port: chrome.runtime.Port): void {
+  const tabId = port.sender?.tab?.id;
+  if (tabId === undefined) {
+    return;
+  }
+  protectPorts.set(tabId, port);
+  void writeProtectBadge(tabId, true);
+  port.onDisconnect.addListener(() => {
+    if (protectPorts.get(tabId) !== port) {
+      return;
+    }
+    protectPorts.delete(tabId);
+    void writeProtectBadge(tabId, false);
+  });
+}
+
 chrome.runtime.onConnect.addListener((port) => {
-  if (port.name !== 'domguard-protect' || port.sender?.id !== chrome.runtime.id) {
+  if (port.name !== PROTECT_PORT || port.sender?.id !== chrome.runtime.id) {
     return;
   }
   // The port stays open so the content script can tell an extension shutdown
-  // from a worker restart. The page itself is not read.
+  // from a worker restart. Disconnect (navigation, tab close, or Protect Mode
+  // turning itself off) clears this tab's badge. The page itself is not read.
+  trackProtectPort(port);
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  protectPorts.delete(tabId);
+  void writeProtectBadge(tabId, false);
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.url === undefined && changeInfo.status !== 'complete') {
+    return;
+  }
+  // A live port means this document is still protected, including an in-page
+  // URL change. A navigation that destroyed the document drops the port first;
+  // this clears a badge that would otherwise survive a worker restart.
+  if (protectPorts.has(tabId)) {
+    return;
+  }
+  void writeProtectBadge(tabId, false);
 });
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
