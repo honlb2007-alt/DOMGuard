@@ -4,6 +4,14 @@
   "version": "0.1.0",
   "description": "Scan, mask, and sanitize sensitive DOM content on the current tab.",
   "permissions": ["activeTab", "storage", "scripting"],
+  "host_permissions": ["https://extensionpay.com/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://extensionpay.com/*"],
+      "js": ["src/extpay/content.ts"],
+      "run_at": "document_start"
+    }
+  ],
   "action": {
     "default_popup": "src/popup/index.html",
     "default_icon": {

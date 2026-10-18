@@ -46,6 +46,19 @@ export interface CheckProMessage {
   type: 'CHECK_PRO';
 }
 
+export interface GetStatusMessage {
+  type: 'GET_STATUS';
+}
+
+export interface OpenUpgradeMessage {
+  type: 'OPEN_UPGRADE';
+}
+
+/** Sent by the service worker after a payment. Not a popup request. */
+export interface ProStatusChangedMessage {
+  type: 'PRO_STATUS_CHANGED';
+}
+
 export type ExtensionMessage =
   | ScanAndMaskMessage
   | UpdateMaskStyleMessage
@@ -55,7 +68,9 @@ export type ExtensionMessage =
   | SanitizeBeforeCaptureMessage
   | RestoreAfterCaptureMessage
   | CaptureScreenshotMessage
-  | CheckProMessage;
+  | CheckProMessage
+  | GetStatusMessage
+  | OpenUpgradeMessage;
 
 export type MessageType = ExtensionMessage['type'];
 
@@ -127,6 +142,22 @@ export interface CheckProResponse {
   isPro: boolean;
 }
 
+export interface QuotaStatus {
+  used: number;
+  remaining: number;
+  limit: number;
+}
+
+export interface GetStatusResponse {
+  ok: true;
+  paid: boolean;
+  quota: QuotaStatus;
+}
+
+export interface OpenUpgradeResponse {
+  ok: true;
+}
+
 export interface ErrorResponse {
   ok: false;
   error: string;
@@ -143,6 +174,8 @@ export interface SuccessResponseMap {
   RESTORE_AFTER_CAPTURE: RestoreAfterCaptureResponse;
   CAPTURE_SCREENSHOT: CaptureScreenshotResponse;
   CHECK_PRO: CheckProResponse;
+  GET_STATUS: GetStatusResponse;
+  OPEN_UPGRADE: OpenUpgradeResponse;
 }
 
 /** Any response a given message type can produce. */
@@ -151,7 +184,38 @@ export type ResponseFor<T extends MessageType> = SuccessResponseMap[T] | ErrorRe
 export type ExtensionResponse = ResponseFor<MessageType>;
 
 /** Message types the service worker answers without touching the page. */
-export const BACKGROUND_MESSAGE_TYPES = ['CAPTURE_SCREENSHOT', 'CHECK_PRO'] as const;
+export const BACKGROUND_MESSAGE_TYPES = [
+  'CAPTURE_SCREENSHOT',
+  'CHECK_PRO',
+  'GET_STATUS',
+  'OPEN_UPGRADE',
+] as const;
+
+const MESSAGE_TYPES: readonly MessageType[] = [
+  'SCAN_AND_MASK',
+  'UPDATE_MASK_STYLE',
+  'CLEAR_MASKS',
+  'TOGGLE_PICKER',
+  'DETECT_HIDDEN_TEXT',
+  'SANITIZE_BEFORE_CAPTURE',
+  'RESTORE_AFTER_CAPTURE',
+  'CAPTURE_SCREENSHOT',
+  'CHECK_PRO',
+  'GET_STATUS',
+  'OPEN_UPGRADE',
+];
+
+export function isExtensionMessage(value: unknown): value is ExtensionMessage {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const type = (value as { type?: unknown }).type;
+  return typeof type === 'string' && MESSAGE_TYPES.includes(type as MessageType);
+}
+
+export function isProStatusChanged(value: unknown): value is ProStatusChangedMessage {
+  return Boolean(value) && typeof value === 'object' && (value as { type?: unknown }).type === 'PRO_STATUS_CHANGED';
+}
 
 export type BackgroundMessageType = (typeof BACKGROUND_MESSAGE_TYPES)[number];
 

@@ -18,6 +18,7 @@ import {
 import { stopPicker, togglePicker as toggleElementPicker } from './picker';
 import { scanPage, type PageMatch } from './scanner';
 import {
+  isExtensionMessage,
   toErrorResponse,
   type ExtensionMessage,
   type ExtensionResponse,
@@ -25,6 +26,7 @@ import {
   type ResponseFor,
 } from '../shared/messages';
 
+/** Boolean injection guard. Not a function, and not a page API. */
 const INJECTION_FLAG = '__DOMGUARD_INJECTED__';
 
 type GlobalWithFlag = typeof globalThis & Record<typeof INJECTION_FLAG, boolean | undefined>;
@@ -83,8 +85,24 @@ function reportHiddenText(): ResponseFor<'DETECT_HIDDEN_TEXT'> {
   return { ok: true, count: findings.length, findings };
 }
 
-function sanitizeBeforeCapture(): ResponseFor<'SANITIZE_BEFORE_CAPTURE'> {
-  return { ok: true, hiddenCount: hideHiddenText() };
+/** Resolves once the browser has reached the next frame, before it paints. */
+function nextFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      resolve();
+    });
+  });
+}
+
+async function sanitizeBeforeCapture(): Promise<ResponseFor<'SANITIZE_BEFORE_CAPTURE'>> {
+  // DOMGuard masks live in a closed shadow host outside the scanned tree, so
+  // they stay painted. The screenshot is supposed to show them.
+  const hiddenCount = hideHiddenText();
+  // The first frame applies the visibility change; the second runs only after
+  // that frame has painted, so captureVisibleTab cannot race the old pixels.
+  await nextFrame();
+  await nextFrame();
+  return { ok: true, hiddenCount };
 }
 
 function restoreAfterCapture(): ResponseFor<'RESTORE_AFTER_CAPTURE'> {
@@ -111,6 +129,8 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
       return restoreAfterCapture();
     case 'CAPTURE_SCREENSHOT':
     case 'CHECK_PRO':
+    case 'GET_STATUS':
+    case 'OPEN_UPGRADE':
       return { ok: false, error: `${message.type} is handled by the service worker.` };
   }
 }
@@ -124,7 +144,12 @@ if (globalWithFlag[INJECTION_FLAG] !== true) {
     void runScan(maskStyle);
   });
 
-  chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
+  chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
+    // Page scripts cannot call in. There is no postMessage listener, and the
+    // only entry is this channel, restricted to our own extension id.
+    if (sender.id !== chrome.runtime.id || !isExtensionMessage(message)) {
+      return;
+    }
     // Scanning batches across idle callbacks, so the channel must stay open.
     handleMessage(message)
       .then(sendResponse)

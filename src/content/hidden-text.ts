@@ -258,6 +258,10 @@ export function detectHiddenText(): HiddenFinding[] {
 /**
  * Hide every hidden-text element so it cannot reach a screenshot. Returns how
  * many elements were hidden.
+ *
+ * The mask overlay is not touched. It is a closed shadow host on
+ * documentElement, and candidates inside `[data-domguard]` are skipped, so the
+ * masks stay in the screenshot.
  */
 export function sanitizeBeforeCapture(): number {
   // Never stack two sanitize passes; the first one owns the saved values.

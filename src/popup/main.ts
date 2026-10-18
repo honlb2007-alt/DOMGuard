@@ -1,5 +1,6 @@
 import {
   MASK_STYLES,
+  isProStatusChanged,
   sendToBackground,
   toErrorResponse,
   type ExtensionMessage,
@@ -15,7 +16,6 @@ const SIMPLE_BUTTONS: ReadonlyArray<readonly [elementId: string, message: Extens
   ['clear-masks', { type: 'CLEAR_MASKS' }],
   ['sanitize-before-capture', { type: 'SANITIZE_BEFORE_CAPTURE' }],
   ['restore-after-capture', { type: 'RESTORE_AFTER_CAPTURE' }],
-  ['capture-screenshot', { type: 'CAPTURE_SCREENSHOT' }],
   ['check-pro', { type: 'CHECK_PRO' }],
 ];
 
@@ -23,8 +23,12 @@ const PICKER_LABEL = 'Manual picker';
 
 const HIDDEN_TEXT_LABEL = 'Scan Hidden Text';
 
+const SCREENSHOT_LABEL = 'Safe Screenshot';
+
 /** Shown for any failure; internal error detail never reaches the popup. */
 const SCAN_FAILED_MESSAGE = 'Scan failed. Please try again.';
+
+const SCREENSHOT_FAILED_MESSAGE = 'Screenshot failed. Please try again.';
 
 /** Long lists make the popup unusable, so the rest is summarised. */
 const MAX_LISTED_FINDINGS = 20;
@@ -191,11 +195,26 @@ for (const [elementId, message] of SIMPLE_BUTTONS) {
   });
 }
 
+/** Ask the service worker for the paid flag and today's remaining screenshots. */
+async function refreshEntitlement(): Promise<void> {
+  try {
+    const response = await sendToBackground({ type: 'GET_STATUS' });
+    if (!response.ok) {
+      return;
+    }
+    setStatus(
+      response.paid
+        ? 'Pro active.'
+        : `Free — ${response.quota.remaining} screenshot(s) left today.`,
+    );
+  } catch {
+    // Leave the current status in place when the worker cannot be reached.
+  }
+}
+
 /** Hidden-text scan: own handler because it renders a list, not a status line. */
 async function scanHiddenText(target: HTMLButtonElement): Promise<void> {
-  // TODO (Task C): this is a Pro feature. The service worker will verify the
-  // ExtensionPay entitlement before handling DETECT_HIDDEN_TEXT, so the popup
-  // must not be the only thing gating access.
+  // Pro is decided in the service worker. This handler does not grant it.
   target.disabled = true;
   target.textContent = 'Scanning…';
   clearFindings();
@@ -220,6 +239,48 @@ async function scanHiddenText(target: HTMLButtonElement): Promise<void> {
   }
 }
 
+function screenshotFilename(now: Date): string {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const date = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
+  const time = `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  return `domguard-${date}-${time}.png`;
+}
+
+/** Start a download, then drop the anchor so the data URL is not left in the DOM. */
+function downloadDataUrl(dataUrl: string, filename: string): void {
+  const link = document.createElement('a');
+  link.href = dataUrl;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+}
+
+async function captureSafeScreenshot(target: HTMLButtonElement): Promise<void> {
+  target.disabled = true;
+  target.textContent = 'Capturing…';
+  setStatus('Capturing the visible area…');
+  try {
+    const response = await sendToBackground({ type: 'CAPTURE_SCREENSHOT' });
+    if (!response.ok || !response.dataUrl) {
+      setStatus(SCREENSHOT_FAILED_MESSAGE);
+      return;
+    }
+    downloadDataUrl(response.dataUrl, screenshotFilename(new Date()));
+    setStatus('Screenshot downloaded.');
+  } catch {
+    setStatus(SCREENSHOT_FAILED_MESSAGE);
+  } finally {
+    target.disabled = false;
+    target.textContent = SCREENSHOT_LABEL;
+  }
+}
+
+const screenshotButton = button('capture-screenshot');
+screenshotButton?.addEventListener('click', () => {
+  void captureSafeScreenshot(screenshotButton);
+});
+
 const hiddenTextButton = button('detect-hidden-text');
 hiddenTextButton?.addEventListener('click', () => {
   void scanHiddenText(hiddenTextButton);
@@ -238,6 +299,12 @@ pickerToggle?.addEventListener('click', () => {
       setPickerLabel(response.active);
     }
   })();
+});
+
+chrome.runtime.onMessage.addListener((message: unknown) => {
+  if (isProStatusChanged(message)) {
+    void refreshEntitlement();
+  }
 });
 
 if (styleSelect instanceof HTMLSelectElement) {
