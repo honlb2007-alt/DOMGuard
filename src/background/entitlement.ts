@@ -6,17 +6,26 @@ import type { QuotaStatus } from '../shared/messages';
 /** One instance per service-worker start. Call startBackground() once, from the worker. */
 export const extpay = ExtPay(EXTPAY_ID);
 
-const PRO_CACHE_KEY = 'domguardProCache';
+/**
+ * Paid flag kept only in this worker's memory. A restart throws it away and
+ * the next check asks ExtensionPay again. That is intentional: the value is
+ * never written to chrome.storage, so it cannot be forged from the outside.
+ */
+const PRO_CACHE_TTL_MS = 10 * 60 * 1000;
 
-/** Offline grace for the last successful paid check. Not a substitute for getUser(). */
-const PRO_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-
+/**
+ * Free screenshot count for the local calendar day.
+ * It lives in chrome.storage.local on this machine. The person using the
+ * browser can change it, so it is not a security boundary.
+ */
 const QUOTA_KEY = 'domguardScreenshotQuota';
 
 interface ProCache {
   paid: boolean;
   checkedAt: number;
 }
+
+let proCache: ProCache | null = null;
 
 interface QuotaRecord {
   date: string;
@@ -27,14 +36,6 @@ interface QuotaRecord {
 function localDateKey(now: Date): string {
   const pad = (value: number) => String(value).padStart(2, '0');
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-}
-
-function isProCache(value: unknown): value is ProCache {
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-  const cache = value as { paid?: unknown; checkedAt?: unknown };
-  return typeof cache.paid === 'boolean' && typeof cache.checkedAt === 'number';
 }
 
 function isQuotaRecord(value: unknown): value is QuotaRecord {
@@ -50,20 +51,17 @@ function isQuotaRecord(value: unknown): value is QuotaRecord {
   );
 }
 
-/** Last successful paid flag, if it is still inside the 24-hour window. */
-async function readFreshProCache(now: number): Promise<boolean | null> {
-  const stored = await chrome.storage.local.get(PRO_CACHE_KEY);
-  const cache = stored[PRO_CACHE_KEY];
-  if (!isProCache(cache) || now - cache.checkedAt >= PRO_CACHE_TTL_MS) {
+function freshProCache(now: number): boolean | null {
+  if (!proCache || now - proCache.checkedAt >= PRO_CACHE_TTL_MS) {
     return null;
   }
-  return cache.paid;
+  return proCache.paid;
 }
 
 /**
- * Paid status from ExtensionPay. A network or API failure falls back to the
- * last successful check for 24 hours, then to unpaid. The cache is only a
- * boolean and a timestamp.
+ * Paid status from ExtensionPay. A fresh in-memory result is reused for 10
+ * minutes. If getUser() fails, the answer is unpaid. Nothing in storage is
+ * consulted.
  */
 export async function isPro(): Promise<boolean> {
   // Removed entirely from production builds. Reads a local boolean so the Pro
@@ -75,21 +73,24 @@ export async function isPro(): Promise<boolean> {
     }
   }
 
+  const cached = freshProCache(Date.now());
+  if (cached !== null) {
+    return cached;
+  }
+
   try {
     const user = await extpay.getUser();
     const paid = user.paid === true;
-    const cache: ProCache = { paid, checkedAt: Date.now() };
-    await chrome.storage.local.set({ [PRO_CACHE_KEY]: cache });
+    proCache = { paid, checkedAt: Date.now() };
     return paid;
   } catch {
-    const cached = await readFreshProCache(Date.now()).catch(() => null);
-    return cached ?? false;
+    return false;
   }
 }
 
-/** Drop the paid cache after a payment so the next check hits ExtensionPay. */
-export async function clearProCache(): Promise<void> {
-  await chrome.storage.local.remove(PRO_CACHE_KEY);
+/** Drop the in-memory paid flag so the next check asks ExtensionPay. */
+export function clearProCache(): void {
+  proCache = null;
 }
 
 async function readQuota(now: Date): Promise<QuotaRecord> {

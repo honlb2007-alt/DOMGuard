@@ -13,12 +13,13 @@ import {
   clearMasks as clearAllMasks,
   maskCount,
   setRescanRequestHandler,
+  stopAutoRescan,
   updateMaskStyle,
 } from './masker';
 import { stopPicker, togglePicker as toggleElementPicker } from './picker';
 import { scanPage, type PageMatch } from './scanner';
 import {
-  isExtensionMessage,
+  parseExtensionMessage,
   toErrorResponse,
   type ExtensionMessage,
   type ExtensionResponse,
@@ -141,17 +142,43 @@ if (globalWithFlag[INJECTION_FLAG] !== true) {
   // A structural page change can reveal new content, so the masker asks for a
   // debounced rescan rather than re-running patterns on every mutation.
   setRescanRequestHandler(() => {
-    void runScan(maskStyle);
+    void (async () => {
+      // The masker already waits before asking. Confirm Pro again here, and
+      // stop automatic scans when the worker cannot vouch for the install.
+      try {
+        const response: unknown = await chrome.runtime.sendMessage({ type: 'GET_STATUS' });
+        if (
+          !response ||
+          typeof response !== 'object' ||
+          !('ok' in response) ||
+          !('paid' in response) ||
+          (response as { ok?: unknown }).ok !== true ||
+          (response as { paid?: unknown }).paid !== true
+        ) {
+          stopAutoRescan();
+          return;
+        }
+      } catch {
+        stopAutoRescan();
+        return;
+      }
+      await runScan(maskStyle);
+    })();
   });
 
   chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
     // Page scripts cannot call in. There is no postMessage listener, and the
     // only entry is this channel, restricted to our own extension id.
-    if (sender.id !== chrome.runtime.id || !isExtensionMessage(message)) {
+    if (sender.id !== chrome.runtime.id) {
       return;
     }
+    const parsed = parseExtensionMessage(message);
+    if (!parsed) {
+      sendResponse({ ok: false, error: 'INVALID_MESSAGE' });
+      return true;
+    }
     // Scanning batches across idle callbacks, so the channel must stay open.
-    handleMessage(message)
+    handleMessage(parsed)
       .then(sendResponse)
       .catch((error: unknown) => sendResponse(toErrorResponse(error)));
     return true;

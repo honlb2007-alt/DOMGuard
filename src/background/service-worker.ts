@@ -8,7 +8,7 @@ import {
 } from './entitlement';
 import { cleanScreenshot } from './pixel-clean';
 import {
-  isExtensionMessage,
+  parseExtensionMessage,
   toErrorResponse,
   type ExtensionMessage,
   type ExtensionResponse,
@@ -147,7 +147,10 @@ async function captureProScreenshot(): Promise<string> {
   return blobToDataUrl(cleaned);
 }
 
-/** Visible-tab capture only. Masks already on the page stay in the image. */
+/**
+ * Visible-tab capture only. Does not sanitize hidden text. Masks already on
+ * the page stay in the image.
+ */
 async function capturePlainScreenshot(): Promise<string> {
   const tab = await getActiveTab();
   const captured = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
@@ -206,11 +209,16 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
       } catch {
         return { ok: false, error: 'UPGRADE_UNAVAILABLE' };
       }
+    case 'SANITIZE_BEFORE_CAPTURE':
+      if (!(await isPro())) {
+        return { ok: false, error: 'PRO_REQUIRED' };
+      }
+      return forwardToContent(message);
     case 'TOGGLE_PICKER':
     case 'CLEAR_MASKS':
     case 'UPDATE_MASK_STYLE':
-    case 'SANITIZE_BEFORE_CAPTURE':
     case 'RESTORE_AFTER_CAPTURE':
+      // Restore stays available so a cleaned page can always be put back.
       return forwardToContent(message);
   }
 }
@@ -231,12 +239,15 @@ extpay.onPaid.addListener(() => {
 });
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
-  // Leave ExtPay's own string messages for its listener. Only our popup messages
-  // are answered here, and only when they come from this extension.
-  if (sender.id !== chrome.runtime.id || !isExtensionMessage(message)) {
+  if (sender.id !== chrome.runtime.id) {
     return;
   }
-  handleMessage(message)
+  const parsed = parseExtensionMessage(message);
+  if (!parsed) {
+    sendResponse({ ok: false, error: 'INVALID_MESSAGE' });
+    return true;
+  }
+  handleMessage(parsed)
     .then(sendResponse)
     .catch((error: unknown) => sendResponse(toErrorResponse(error)));
   return true;

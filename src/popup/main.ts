@@ -1,6 +1,7 @@
 import {
   MASK_STYLES,
   isProStatusChanged,
+  parseExtensionMessage,
   sendToBackground,
   type ExtensionMessage,
   type ExtensionResponse,
@@ -474,9 +475,18 @@ button('upgrade-dismiss')?.addEventListener('click', () => {
   closeUpgrade();
 });
 
-chrome.runtime.onMessage.addListener((message: unknown) => {
+chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
+  if (sender.id !== chrome.runtime.id) {
+    return;
+  }
+  // Payment notice. It is not a command, so the command parser does not accept it.
   if (isProStatusChanged(message)) {
     void refreshEntitlement();
+    return;
+  }
+  if (!parseExtensionMessage(message)) {
+    sendResponse({ ok: false, error: 'INVALID_MESSAGE' });
+    return true;
   }
 });
 

@@ -29,6 +29,7 @@ const RECT_PADDING = 2;
 /** Mutated nodes in one batch before we assume the page changed structurally. */
 const RESCAN_NODE_THRESHOLD = 20;
 
+/** Wait before a rescan so a burst of mutations causes one Pro check, not many. */
 const RESCAN_DEBOUNCE_MS = 600;
 
 const HOST_STYLE: ReadonlyArray<readonly [string, string]> = [
@@ -166,24 +167,39 @@ function handleMutations(records: MutationRecord[]): void {
   }
 }
 
-function startListening(): void {
-  if (listening) {
+function ensureObserver(): void {
+  if (observer || !document.body) {
     return;
   }
-  // Capture phase: scroll does not bubble, but capture still runs on window for
-  // events targeted at any scrollable container inside the page.
-  window.addEventListener('scroll', scheduleUpdate, { capture: true, passive: true });
-  window.addEventListener('resize', scheduleUpdate, { passive: true });
-  if (document.body) {
-    observer = new MutationObserver(handleMutations);
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ['style', 'class'],
-    });
+  observer = new MutationObserver(handleMutations);
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['style', 'class'],
+  });
+}
+
+function startListening(): void {
+  if (!listening) {
+    // Capture phase: scroll does not bubble, but capture still runs on window for
+    // events targeted at any scrollable container inside the page.
+    window.addEventListener('scroll', scheduleUpdate, { capture: true, passive: true });
+    window.addEventListener('resize', scheduleUpdate, { passive: true });
+    listening = true;
   }
-  listening = true;
+  ensureObserver();
+}
+
+/** Stop future automatic scans. Masks that are already drawn stay put. */
+export function stopAutoRescan(): void {
+  autoMaskEnabled = false;
+  if (rescanTimer) {
+    clearTimeout(rescanTimer);
+    rescanTimer = 0;
+  }
+  observer?.disconnect();
+  observer = null;
 }
 
 function stopListening(): void {

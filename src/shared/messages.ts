@@ -191,26 +191,59 @@ export const BACKGROUND_MESSAGE_TYPES = [
   'OPEN_UPGRADE',
 ] as const;
 
-const MESSAGE_TYPES: readonly MessageType[] = [
-  'SCAN_AND_MASK',
-  'UPDATE_MASK_STYLE',
-  'CLEAR_MASKS',
-  'TOGGLE_PICKER',
-  'DETECT_HIDDEN_TEXT',
-  'SANITIZE_BEFORE_CAPTURE',
-  'RESTORE_AFTER_CAPTURE',
-  'CAPTURE_SCREENSHOT',
-  'CHECK_PRO',
-  'GET_STATUS',
-  'OPEN_UPGRADE',
-];
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isMaskStyle(value: unknown): value is MaskStyle {
+  return typeof value === 'string' && (MASK_STYLES as readonly string[]).includes(value);
+}
+
+/**
+ * Build a known command from an untrusted message. Unknown fields are dropped.
+ * A wrong type, a missing required field, or a bad value returns null and does
+ * not throw.
+ */
+export function parseExtensionMessage(raw: unknown): ExtensionMessage | null {
+  if (!isRecord(raw) || typeof raw.type !== 'string') {
+    return null;
+  }
+  switch (raw.type) {
+    case 'SCAN_AND_MASK': {
+      if ('style' in raw && raw.style !== undefined && !isMaskStyle(raw.style)) {
+        return null;
+      }
+      return isMaskStyle(raw.style)
+        ? { type: 'SCAN_AND_MASK', style: raw.style }
+        : { type: 'SCAN_AND_MASK' };
+    }
+    case 'UPDATE_MASK_STYLE':
+      return isMaskStyle(raw.style) ? { type: 'UPDATE_MASK_STYLE', style: raw.style } : null;
+    case 'CLEAR_MASKS':
+      return { type: 'CLEAR_MASKS' };
+    case 'TOGGLE_PICKER':
+      return { type: 'TOGGLE_PICKER' };
+    case 'DETECT_HIDDEN_TEXT':
+      return { type: 'DETECT_HIDDEN_TEXT' };
+    case 'SANITIZE_BEFORE_CAPTURE':
+      return { type: 'SANITIZE_BEFORE_CAPTURE' };
+    case 'RESTORE_AFTER_CAPTURE':
+      return { type: 'RESTORE_AFTER_CAPTURE' };
+    case 'CAPTURE_SCREENSHOT':
+      return { type: 'CAPTURE_SCREENSHOT' };
+    case 'CHECK_PRO':
+      return { type: 'CHECK_PRO' };
+    case 'GET_STATUS':
+      return { type: 'GET_STATUS' };
+    case 'OPEN_UPGRADE':
+      return { type: 'OPEN_UPGRADE' };
+    default:
+      return null;
+  }
+}
 
 export function isExtensionMessage(value: unknown): value is ExtensionMessage {
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-  const type = (value as { type?: unknown }).type;
-  return typeof type === 'string' && MESSAGE_TYPES.includes(type as MessageType);
+  return parseExtensionMessage(value) !== null;
 }
 
 export function isProStatusChanged(value: unknown): value is ProStatusChangedMessage {
