@@ -33,10 +33,26 @@
         <button id="detect-hidden-text" type="button" class="btn">
           <span class="btn-label">Scan Hidden Text</span>
         </button>
+        <div class="protect">
+          <label class="protect-toggle" for="protect-mode">
+            <input id="protect-mode" type="checkbox" />
+            <span>Protect Mode</span>
+          </label>
+          <span id="protect-pro-mark" class="pro-marks" hidden></span>
+        </div>
+        <p class="hint">
+          Hides hidden text on this page while on. Works with any screenshot or screen recording
+          tool.
+        </p>
         <div class="shot">
-          <button id="capture-screenshot" type="button" class="btn btn-primary">
-            <span class="btn-label">Safe Screenshot</span>
-          </button>
+          <div class="shot-actions">
+            <button id="capture-screenshot" type="button" class="btn btn-primary">
+              <span class="btn-label">Safe Screenshot</span>
+            </button>
+            <button id="copy-screenshot" type="button" class="btn">
+              <span class="btn-label">Copy</span>
+            </button>
+          </div>
           <p class="hint">Captures the visible area only.</p>
         </div>
       </div>

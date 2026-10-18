@@ -72,6 +72,17 @@ async function forwardToContent<T extends ExtensionMessage>(
   return (await chrome.tabs.sendMessage(tabId, message)) as ResponseFor<T['type']>;
 }
 
+/** Ask the content script only when it is already on the page. Does not inject. */
+async function sendIfInjected<T extends ExtensionMessage>(
+  message: T,
+): Promise<ResponseFor<T['type']> | null> {
+  const tab = await getActiveTab();
+  if (!(await hasContentScript(tab.id))) {
+    return null;
+  }
+  return (await chrome.tabs.sendMessage(tab.id, message)) as ResponseFor<T['type']>;
+}
+
 /** Decode a capture data URL without logging or retaining the bytes. */
 function dataUrlToBlob(dataUrl: string): Blob {
   const comma = dataUrl.indexOf(',');
@@ -198,6 +209,27 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
       return forwardToContent(message);
     case 'CAPTURE_SCREENSHOT':
       return captureScreenshot();
+    case 'ENABLE_PROTECT':
+      if (!(await isPro())) {
+        return { ok: false, error: 'PRO_REQUIRED' };
+      }
+      try {
+        return await forwardToContent(message);
+      } catch {
+        return { ok: false, error: 'PROTECT_UNAVAILABLE' };
+      }
+    case 'DISABLE_PROTECT':
+      try {
+        return (await sendIfInjected(message)) ?? { ok: true, active: false };
+      } catch {
+        return { ok: true, active: false };
+      }
+    case 'GET_PROTECT_STATE':
+      try {
+        return (await sendIfInjected(message)) ?? { ok: true, active: false };
+      } catch {
+        return { ok: true, active: false };
+      }
     case 'CHECK_PRO':
       return { ok: true, isPro: await isPro() };
     case 'GET_STATUS':
@@ -236,6 +268,14 @@ extpay.onPaid.addListener(() => {
       // The popup is not open, so there is nothing to refresh.
     }
   })();
+});
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== 'domguard-protect' || port.sender?.id !== chrome.runtime.id) {
+    return;
+  }
+  // The port stays open so the content script can tell an extension shutdown
+  // from a worker restart. The page itself is not read.
 });
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {

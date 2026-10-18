@@ -56,6 +56,51 @@ body {
   flex-direction: column;
 }
 
+.shot-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.shot-actions .btn {
+  width: auto;
+  justify-content: center;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.shot-actions .btn-primary {
+  flex: 1;
+}
+
+.shot-actions #copy-screenshot {
+  flex: 0 0 auto;
+  min-width: 76px;
+}
+
+.protect {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 36px;
+}
+
+.protect-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.protect-toggle input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--brass);
+}
+
 .header,
 .actions,
 .shot {

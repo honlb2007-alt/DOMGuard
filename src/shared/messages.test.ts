@@ -16,6 +16,15 @@ describe('parseExtensionMessage', () => {
     expect(parseExtensionMessage({ type: 'CLEAR_MASKS', note: 'ignore me' })).toEqual({
       type: 'CLEAR_MASKS',
     });
+    expect(parseExtensionMessage({ type: 'ENABLE_PROTECT', paid: true })).toEqual({
+      type: 'ENABLE_PROTECT',
+    });
+    expect(parseExtensionMessage({ type: 'DISABLE_PROTECT' })).toEqual({
+      type: 'DISABLE_PROTECT',
+    });
+    expect(parseExtensionMessage({ type: 'GET_PROTECT_STATE', active: true })).toEqual({
+      type: 'GET_PROTECT_STATE',
+    });
   });
 
   it('rejects a style outside the allowed set', () => {

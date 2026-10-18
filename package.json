@@ -7,11 +7,16 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build && vite build --config vite.content.config.ts",
+    "concepts": "node scripts/render-concepts.mjs",
+    "concepts-v2": "node scripts/render-concepts-v2.mjs",
+    "concepts-v3": "node scripts/render-concepts-v3.mjs",
+    "icons": "node scripts/preview-icons.mjs",
     "package": "npm run build && node scripts/package-extension.mjs",
     "test": "vitest run"
   },
   "devDependencies": {
     "@crxjs/vite-plugin": "^2.2.0",
+    "@resvg/resvg-js": "^2.6.2",
     "@types/chrome": "^0.1.24",
     "typescript": "^5.9.3",
     "vite": "^5.4.21",

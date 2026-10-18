@@ -42,6 +42,18 @@ export interface CaptureScreenshotMessage {
   type: 'CAPTURE_SCREENSHOT';
 }
 
+export interface EnableProtectMessage {
+  type: 'ENABLE_PROTECT';
+}
+
+export interface DisableProtectMessage {
+  type: 'DISABLE_PROTECT';
+}
+
+export interface GetProtectStateMessage {
+  type: 'GET_PROTECT_STATE';
+}
+
 export interface CheckProMessage {
   type: 'CHECK_PRO';
 }
@@ -68,6 +80,9 @@ export type ExtensionMessage =
   | SanitizeBeforeCaptureMessage
   | RestoreAfterCaptureMessage
   | CaptureScreenshotMessage
+  | EnableProtectMessage
+  | DisableProtectMessage
+  | GetProtectStateMessage
   | CheckProMessage
   | GetStatusMessage
   | OpenUpgradeMessage;
@@ -137,6 +152,11 @@ export interface CaptureScreenshotResponse {
   dataUrl: string | null;
 }
 
+export interface ProtectStateResponse {
+  ok: true;
+  active: boolean;
+}
+
 export interface CheckProResponse {
   ok: true;
   isPro: boolean;
@@ -173,6 +193,9 @@ export interface SuccessResponseMap {
   SANITIZE_BEFORE_CAPTURE: SanitizeBeforeCaptureResponse;
   RESTORE_AFTER_CAPTURE: RestoreAfterCaptureResponse;
   CAPTURE_SCREENSHOT: CaptureScreenshotResponse;
+  ENABLE_PROTECT: ProtectStateResponse;
+  DISABLE_PROTECT: ProtectStateResponse;
+  GET_PROTECT_STATE: ProtectStateResponse;
   CHECK_PRO: CheckProResponse;
   GET_STATUS: GetStatusResponse;
   OPEN_UPGRADE: OpenUpgradeResponse;
@@ -231,6 +254,12 @@ export function parseExtensionMessage(raw: unknown): ExtensionMessage | null {
       return { type: 'RESTORE_AFTER_CAPTURE' };
     case 'CAPTURE_SCREENSHOT':
       return { type: 'CAPTURE_SCREENSHOT' };
+    case 'ENABLE_PROTECT':
+      return { type: 'ENABLE_PROTECT' };
+    case 'DISABLE_PROTECT':
+      return { type: 'DISABLE_PROTECT' };
+    case 'GET_PROTECT_STATE':
+      return { type: 'GET_PROTECT_STATE' };
     case 'CHECK_PRO':
       return { type: 'CHECK_PRO' };
     case 'GET_STATUS':

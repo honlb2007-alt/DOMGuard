@@ -15,6 +15,10 @@ const SCAN_LABEL = 'Auto Scan & Mask';
 const HIDDEN_TEXT_LABEL = 'Scan Hidden Text';
 const SCREENSHOT_LABEL = 'Safe Screenshot';
 const SCREENSHOT_LIMIT_LABEL = 'Daily limit reached';
+const COPY_LABEL = 'Copy';
+const COPIED_LABEL = 'Copied';
+const COPY_FAILED = 'Could not copy. Try Download instead.';
+const COPIED_VISIBLE_MS = 1600;
 const GENERIC_ERROR = 'Something went wrong. Please try again.';
 const CLEANUP_NOTE = 'Hidden-text cleanup is a Pro feature';
 const MAX_LISTED_FINDINGS = 20;
@@ -46,6 +50,9 @@ let upgradeDismissed = false;
 let upgradeTrigger: HTMLElement | null = null;
 let cleanupNoteShown = false;
 let screenshotBusy = false;
+/** Holds the Copy button on "Copied" until the timer clears it. */
+let copyLabelOverride: string | null = null;
+let copyResetTimer = 0;
 
 function setStatus(text: string): void {
   if (statusEl) {
@@ -168,15 +175,28 @@ function renderPlan(): void {
     ensureProMarks(element).hidden = !unpaid;
   }
 
+  const protectMark = document.getElementById('protect-pro-mark');
+  if (protectMark instanceof HTMLElement) {
+    if (!protectMark.firstChild) {
+      protectMark.append(createLockIcon(), createProTag());
+    }
+    protectMark.hidden = !unpaid;
+  }
+
+  const exhausted = unpaid && remaining <= 0;
   const screenshotButton = button('capture-screenshot');
   if (screenshotButton) {
-    const exhausted = unpaid && remaining <= 0;
     screenshotButton.disabled = screenshotBusy || exhausted;
     labelOf(screenshotButton).textContent = screenshotBusy
       ? 'Capturing…'
       : exhausted
         ? SCREENSHOT_LIMIT_LABEL
         : SCREENSHOT_LABEL;
+  }
+  const copyButton = button('copy-screenshot');
+  if (copyButton) {
+    copyButton.disabled = screenshotBusy || exhausted;
+    labelOf(copyButton).textContent = copyLabelOverride ?? COPY_LABEL;
   }
 
   if (paid && upgradePanel instanceof HTMLElement) {
@@ -316,6 +336,31 @@ function downloadDataUrl(dataUrl: string, filename: string): void {
   link.remove();
 }
 
+function dataUrlToPngBlob(dataUrl: string): Blob {
+  const marker = ';base64,';
+  const splitAt = dataUrl.indexOf(marker);
+  if (!dataUrl.startsWith('data:image/png') || splitAt === -1) {
+    throw new Error('Screenshot was not a PNG.');
+  }
+  const binary = atob(dataUrl.slice(splitAt + marker.length));
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new Blob([bytes], { type: 'image/png' });
+}
+
+function showCopied(target: HTMLButtonElement): void {
+  copyLabelOverride = COPIED_LABEL;
+  labelOf(target).textContent = COPIED_LABEL;
+  window.clearTimeout(copyResetTimer);
+  copyResetTimer = window.setTimeout(() => {
+    copyLabelOverride = null;
+    copyResetTimer = 0;
+    renderPlan();
+  }, COPIED_VISIBLE_MS);
+}
+
 async function captureSafeScreenshot(target: HTMLButtonElement): Promise<void> {
   if (target.disabled) {
     return;
@@ -421,6 +466,65 @@ screenshotButton?.addEventListener('click', () => {
   void captureSafeScreenshot(screenshotButton);
 });
 
+const copyButton = button('copy-screenshot');
+copyButton?.addEventListener('click', () => {
+  if (copyButton.disabled || screenshotBusy) {
+    return;
+  }
+  // write() has to be called in this click, before any await. Passing the PNG
+  // as a promise keeps the user activation alive until the capture finishes,
+  // so the popup does not need the clipboardWrite permission.
+  const wasUnpaid = knownPaid === false;
+  copyLabelOverride = null;
+  window.clearTimeout(copyResetTimer);
+  copyResetTimer = 0;
+  screenshotBusy = true;
+  renderPlan();
+  setStatus('Capturing the visible area…');
+
+  let shotFailed: 'upgrade' | 'capture' | null = null;
+  const pngPromise = (async (): Promise<Blob> => {
+    const response = await sendToBackground({ type: 'CAPTURE_SCREENSHOT' });
+    if (isUpgradeError(response)) {
+      shotFailed = 'upgrade';
+      throw new Error('upgrade');
+    }
+    if (!response.ok || !response.dataUrl) {
+      shotFailed = 'capture';
+      throw new Error('capture');
+    }
+    return dataUrlToPngBlob(response.dataUrl);
+  })();
+
+  const writePromise = navigator.clipboard.write([
+    new ClipboardItem({ 'image/png': pngPromise }),
+  ]);
+
+  void (async () => {
+    try {
+      await writePromise;
+      showCopied(copyButton);
+      setStatus('Copied.');
+      await refreshEntitlement();
+      if (wasUnpaid && knownPaid === false) {
+        revealCleanupNote();
+      }
+    } catch {
+      if (shotFailed === 'upgrade') {
+        openUpgrade(copyButton);
+        await refreshEntitlement();
+      } else if (shotFailed === 'capture') {
+        setStatus(GENERIC_ERROR);
+      } else {
+        setStatus(COPY_FAILED);
+      }
+    } finally {
+      screenshotBusy = false;
+      renderPlan();
+    }
+  })();
+});
+
 const clearButton = button('clear-masks');
 clearButton?.addEventListener('click', () => {
   void (async () => {
@@ -497,4 +601,68 @@ for (const elementId of ['scan-and-mask', 'detect-hidden-text']) {
   }
 }
 
+const protectInput = document.getElementById('protect-mode');
+let protectBusy = false;
+
+function protectToggle(): HTMLInputElement | null {
+  return protectInput instanceof HTMLInputElement ? protectInput : null;
+}
+
+/** Read the page's Protect Mode. A page Chrome will not inject reports off. */
+async function refreshProtect(): Promise<void> {
+  const input = protectToggle();
+  if (!input || protectBusy) {
+    return;
+  }
+  try {
+    const response = await sendToBackground({ type: 'GET_PROTECT_STATE' });
+    if (response.ok) {
+      input.checked = response.active;
+    }
+  } catch {
+    input.checked = false;
+  }
+}
+
+protectToggle()?.addEventListener('change', () => {
+  const input = protectToggle();
+  if (!input || protectBusy) {
+    return;
+  }
+  const wantOn = input.checked;
+  if (wantOn && knownPaid === false) {
+    input.checked = false;
+    openUpgrade(input);
+    return;
+  }
+  protectBusy = true;
+  input.disabled = true;
+  void (async () => {
+    try {
+      const response = await sendToBackground({
+        type: wantOn ? 'ENABLE_PROTECT' : 'DISABLE_PROTECT',
+      });
+      if (!response.ok) {
+        input.checked = !wantOn;
+        if (isUpgradeError(response)) {
+          openUpgrade(input);
+          await refreshEntitlement();
+        } else {
+          setStatus(GENERIC_ERROR);
+        }
+        return;
+      }
+      input.checked = response.active;
+      setStatus(response.active ? 'Protect Mode is on.' : 'Protect Mode is off.');
+    } catch {
+      input.checked = !wantOn;
+      setStatus(GENERIC_ERROR);
+    } finally {
+      input.disabled = false;
+      protectBusy = false;
+    }
+  })();
+});
+
 void refreshEntitlement();
+void refreshProtect();

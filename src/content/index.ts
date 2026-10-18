@@ -16,6 +16,14 @@ import {
   stopAutoRescan,
   updateMaskStyle,
 } from './masker';
+import {
+  concealProtectBadgeForCapture,
+  disableProtectMode,
+  enableProtectMode,
+  isProtectModeActive,
+  protectModeState,
+  revealProtectBadgeAfterCapture,
+} from './protect';
 import { stopPicker, togglePicker as toggleElementPicker } from './picker';
 import { scanPage, type PageMatch } from './scanner';
 import {
@@ -97,7 +105,9 @@ function nextFrame(): Promise<void> {
 
 async function sanitizeBeforeCapture(): Promise<ResponseFor<'SANITIZE_BEFORE_CAPTURE'>> {
   // DOMGuard masks live in a closed shadow host outside the scanned tree, so
-  // they stay painted. The screenshot is supposed to show them.
+  // they stay painted. The screenshot is supposed to show them. The Protect
+  // Mode mark is ours, so it is taken out of this capture only.
+  concealProtectBadgeForCapture();
   const hiddenCount = hideHiddenText();
   // The first frame applies the visibility change; the second runs only after
   // that frame has painted, so captureVisibleTab cannot race the old pixels.
@@ -108,7 +118,12 @@ async function sanitizeBeforeCapture(): Promise<ResponseFor<'SANITIZE_BEFORE_CAP
 
 function restoreAfterCapture(): ResponseFor<'RESTORE_AFTER_CAPTURE'> {
   const hiddenCount = sanitizedCount();
-  restoreHiddenText();
+  // Protect Mode owns the swept elements until the user turns it off. A
+  // screenshot restore must not paint that text again.
+  if (!isProtectModeActive()) {
+    restoreHiddenText();
+  }
+  revealProtectBadgeAfterCapture();
   return { ok: true, hiddenCount };
 }
 
@@ -128,6 +143,12 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
       return sanitizeBeforeCapture();
     case 'RESTORE_AFTER_CAPTURE':
       return restoreAfterCapture();
+    case 'ENABLE_PROTECT':
+      return enableProtectMode();
+    case 'DISABLE_PROTECT':
+      return disableProtectMode();
+    case 'GET_PROTECT_STATE':
+      return protectModeState();
     case 'CAPTURE_SCREENSHOT':
     case 'CHECK_PRO':
     case 'GET_STATUS':

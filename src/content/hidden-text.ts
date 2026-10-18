@@ -264,10 +264,9 @@ export function detectHiddenText(): HiddenFinding[] {
  * masks stay in the screenshot.
  */
 export function sanitizeBeforeCapture(): number {
-  // Never stack two sanitize passes; the first one owns the saved values.
-  if (sanitized.size > 0) {
-    restoreAfterCapture();
-  }
+  // Later calls only add elements that are not already held. The saved inline
+  // value stays the one from before the first hide, so restore can put it back
+  // exactly. Undoing the hide here would paint the text for a frame.
   for (const finding of detectHiddenText()) {
     const { element } = finding;
     if (!(element instanceof HTMLElement) && !(element instanceof SVGElement)) {

@@ -1,0 +1,229 @@
+import { readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { inflateSync } from 'node:zlib';
+import { fileURLToPath } from 'node:url';
+import { Resvg } from '@resvg/resvg-js';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const conceptDir = path.join(root, 'src', 'icons', 'concepts-v3');
+
+function rasterize(svg, size) {
+  const resvg = new Resvg(svg, {
+    fitTo: { mode: 'width', value: size },
+    background: 'rgba(0,0,0,0)',
+  });
+  return Buffer.from(resvg.render().asPng());
+}
+
+function paeth(left, up, upLeft) {
+  const estimate = left + up - upLeft;
+  const dl = Math.abs(estimate - left);
+  const du = Math.abs(estimate - up);
+  const dul = Math.abs(estimate - upLeft);
+  if (dl <= du && dl <= dul) {
+    return left;
+  }
+  if (du <= dul) {
+    return up;
+  }
+  return upLeft;
+}
+
+function decodePng(buffer) {
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  let bitDepth = 0;
+  let colorType = 0;
+  const idat = [];
+  while (offset < buffer.length) {
+    const length = buffer.readUInt32BE(offset);
+    const type = buffer.toString('ascii', offset + 4, offset + 8);
+    const data = buffer.subarray(offset + 8, offset + 8 + length);
+    if (type === 'IHDR') {
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
+      bitDepth = data[8];
+      colorType = data[9];
+    } else if (type === 'IDAT') {
+      idat.push(data);
+    } else if (type === 'IEND') {
+      break;
+    }
+    offset += 12 + length;
+  }
+  const channels = colorType === 6 ? 4 : colorType === 2 ? 3 : 0;
+  if (bitDepth !== 8 || channels === 0) {
+    throw new Error(`Unsupported PNG bit depth ${bitDepth}, color type ${colorType}`);
+  }
+  const raw = inflateSync(Buffer.concat(idat));
+  const stride = width * channels;
+  const out = Buffer.alloc(width * height * 4);
+  const previous = Buffer.alloc(stride);
+  const row = Buffer.alloc(stride);
+  let index = 0;
+  for (let y = 0; y < height; y += 1) {
+    const filter = raw[index];
+    index += 1;
+    for (let x = 0; x < stride; x += 1) {
+      const value = raw[index];
+      index += 1;
+      const left = x >= channels ? row[x - channels] : 0;
+      const up = previous[x];
+      const upLeft = x >= channels ? previous[x - channels] : 0;
+      let decoded = value;
+      if (filter === 1) {
+        decoded = (value + left) & 255;
+      } else if (filter === 2) {
+        decoded = (value + up) & 255;
+      } else if (filter === 3) {
+        decoded = (value + Math.floor((left + up) / 2)) & 255;
+      } else if (filter === 4) {
+        decoded = (value + paeth(left, up, upLeft)) & 255;
+      } else if (filter !== 0) {
+        throw new Error(`Unsupported PNG filter ${filter}`);
+      }
+      row[x] = decoded;
+    }
+    for (let x = 0; x < width; x += 1) {
+      const source = x * channels;
+      const target = (y * width + x) * 4;
+      out[target] = row[source];
+      out[target + 1] = row[source + 1];
+      out[target + 2] = row[source + 2];
+      out[target + 3] = channels === 4 ? row[source + 3] : 255;
+    }
+    previous.set(row);
+  }
+  return { width, height, data: out };
+}
+
+function runs(image) {
+  const rows = [];
+  for (let y = 0; y < image.height; y += 1) {
+    let x = 0;
+    while (x < image.width) {
+      const start = (y * image.width + x) * 4;
+      const alpha = image.data[start + 3];
+      if (alpha === 0) {
+        x += 1;
+        continue;
+      }
+      const red = image.data[start];
+      const green = image.data[start + 1];
+      const blue = image.data[start + 2];
+      let end = x + 1;
+      while (end < image.width) {
+        const next = (y * image.width + end) * 4;
+        if (
+          image.data[next] !== red ||
+          image.data[next + 1] !== green ||
+          image.data[next + 2] !== blue ||
+          image.data[next + 3] !== alpha
+        ) {
+          break;
+        }
+        end += 1;
+      }
+      rows.push({ x, y, width: end - x, red, green, blue, alpha });
+      x = end;
+    }
+  }
+  return rows;
+}
+
+function hex(red, green, blue, alpha) {
+  const value = (channel) => channel.toString(16).padStart(2, '0');
+  if (alpha === 255) {
+    return `#${value(red)}${value(green)}${value(blue)}`;
+  }
+  return `#${value(red)}${value(green)}${value(blue)}${value(alpha)}`;
+}
+
+const candidates = ['s', 'd'];
+const nativeSizes = [16, 32, 128];
+const images = {};
+
+for (const candidate of candidates) {
+  images[candidate] = {};
+  for (const size of nativeSizes) {
+    const svg = readFileSync(path.join(conceptDir, `candidate-${candidate}-${size}.svg`));
+    const png = rasterize(svg, size);
+    writeFileSync(path.join(conceptDir, `candidate-${candidate}-${size}.png`), png);
+    images[candidate][size] = decodePng(png);
+  }
+  const master = readFileSync(path.join(conceptDir, `candidate-${candidate}-128.svg`));
+  const png48 = rasterize(master, 48);
+  writeFileSync(path.join(conceptDir, `candidate-${candidate}-48.png`), png48);
+  images[candidate][48] = decodePng(png48);
+}
+
+const columns = [
+  { title: '16', size: 16, scale: 1, cell: 88 },
+  { title: '16 × 8', size: 16, scale: 8, cell: 168 },
+  { title: '32', size: 32, scale: 1, cell: 96 },
+  { title: '32 × 8', size: 32, scale: 8, cell: 296 },
+  { title: '48', size: 48, scale: 1, cell: 96 },
+  { title: '48 × 3', size: 48, scale: 3, cell: 184 },
+  { title: '128', size: 128, scale: 1, cell: 168 },
+];
+const rowHeight = 312;
+const gap = 24;
+const margin = 32;
+const rail = 220;
+const header = 44;
+const width =
+  margin + rail + columns.reduce((sum, column) => sum + column.cell, 0) + (columns.length - 1) * gap + margin;
+const rowCount = candidates.length * 2;
+const height = margin + header + rowCount * rowHeight + (rowCount - 1) * gap + margin;
+const parts = [
+  `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`,
+  `<rect width="${width}" height="${height}" fill="#D5D5D8"/>`,
+];
+
+columns.forEach((column, index) => {
+  const x =
+    margin +
+    rail +
+    columns.slice(0, index).reduce((sum, item) => sum + item.cell + gap, 0);
+  parts.push(
+    `<text x="${x}" y="${margin + 24}" font-family="Segoe UI, sans-serif" font-size="22" font-weight="600" fill="#101114">${column.title}</text>`,
+  );
+});
+
+const names = { s: 'S · Shield', d: 'D · Letter' };
+candidates.forEach((candidate, candidateIndex) => {
+  ['#FFFFFF', '#202124'].forEach((background, toneIndex) => {
+    const row = candidateIndex * 2 + toneIndex;
+    const y = margin + header + row * (rowHeight + gap);
+    const tone = toneIndex === 0 ? 'Light' : 'Dark';
+    parts.push(
+      `<text x="${margin}" y="${y + 36}" font-family="Segoe UI, sans-serif" font-size="22" font-weight="600" fill="#101114">${names[candidate]}</text>`,
+      `<text x="${margin}" y="${y + 64}" font-family="Segoe UI, sans-serif" font-size="18" fill="#101114">${tone}</text>`,
+    );
+    columns.forEach((column, index) => {
+      const x =
+        margin +
+        rail +
+        columns.slice(0, index).reduce((sum, item) => sum + item.cell + gap, 0);
+      parts.push(
+        `<rect x="${x}" y="${y}" width="${column.cell}" height="${rowHeight}" fill="${background}"/>`,
+      );
+      const image = images[candidate][column.size];
+      const drawnWidth = image.width * column.scale;
+      const drawnHeight = image.height * column.scale;
+      const originX = x + Math.floor((column.cell - drawnWidth) / 2);
+      const originY = y + Math.floor((rowHeight - drawnHeight) / 2);
+      for (const run of runs(image)) {
+        parts.push(
+          `<rect x="${originX + run.x * column.scale}" y="${originY + run.y * column.scale}" width="${run.width * column.scale}" height="${column.scale}" fill="${hex(run.red, run.green, run.blue, run.alpha)}" shape-rendering="crispEdges"/>`,
+        );
+      }
+    });
+  });
+});
+
+parts.push('</svg>');
+const preview = rasterize(parts.join(''), width);
+writeFileSync(path.join(root, 'docs', 'icon-compare-v3.png'), preview);
+console.log(`docs/icon-compare-v3.png (${preview.length} bytes, ${width}x${height})`);
