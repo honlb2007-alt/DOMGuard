@@ -210,5 +210,55 @@
     <div data-domguard="mask-layer">
       <p>這裡的 test.user@example.com 與 4242 4242 4242 4242 都不該被計入結果。</p>
     </div>
+
+    <h2>7. 位置追蹤測試</h2>
+    <p>
+      下面這個容器有自己的滾動條。捲動它時，遮罩必須跟著移動——這要靠捕獲階段的 scroll 監聽才做得到，因為元素的
+      scroll 事件不會冒泡到 window。
+    </p>
+    <div id="scroll-box">
+      <p>內部滾動容器：第一行。</p>
+      <p>卡號 4242 4242 4242 4242</p>
+      <p>信箱 test.user@example.com</p>
+      <p>手機 0912-345-678</p>
+      <p>填充行一</p>
+      <p>填充行二</p>
+      <p>填充行三</p>
+      <p>金鑰 sk-FAKE0000testkey0000testkey0000testkey0000testk</p>
+    </div>
+    <p class="controls">
+      <button id="add-nodes" type="button">動態新增 24 個節點（應觸發防抖重新掃描）</button>
+      <button id="toggle-width" type="button">切換窄版佈局（觸發 reflow）</button>
+    </p>
+    <div id="dynamic"></div>
+
+    <style>
+      #scroll-box {
+        height: 140px;
+        overflow: auto;
+        border: 1px solid #cbd5e1;
+        padding: 0 0.75rem;
+      }
+      .controls button {
+        margin-right: 0.5rem;
+      }
+      body.narrow {
+        max-width: 26rem;
+      }
+    </style>
+    <script>
+      document.getElementById('add-nodes').addEventListener('click', () => {
+        const container = document.getElementById('dynamic');
+        for (let index = 0; index < 24; index += 1) {
+          const line = document.createElement('p');
+          line.textContent = `動態節點 ${index + 1}：0912-345-678 與 4242 4242 4242 4242`;
+          container.appendChild(line);
+        }
+      });
+
+      document.getElementById('toggle-width').addEventListener('click', () => {
+        document.body.classList.toggle('narrow');
+      });
+    </script>
   </body>
 </html>

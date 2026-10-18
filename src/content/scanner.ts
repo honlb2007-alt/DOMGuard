@@ -4,12 +4,25 @@
 
 import { findSensitive } from '../shared/patterns';
 
+/**
+ * A live reference the masker can re-measure after the page changes. Text hits
+ * keep a Range (which the DOM keeps in sync through mutations) and field hits
+ * keep the element, so neither needs the matched text to redraw.
+ */
+export type MaskTarget =
+  | { kind: 'range'; range: Range }
+  | { kind: 'element'; element: Element };
+
 export interface PageMatch {
   id: string;
   label: string;
-  /** Document-space rectangles (viewport rects plus the current scroll offset). */
+  /**
+   * Document-space rectangles captured at scan time, useful for reporting.
+   * The masker ignores these and re-measures `target` instead, because they go
+   * stale as soon as the page scrolls or reflows.
+   */
   rects: DOMRect[];
-  target: Node | Element;
+  target: MaskTarget;
 }
 
 export const PASSWORD_FIELD = { id: 'password_field', label: '密碼欄位' } as const;
@@ -23,8 +36,8 @@ const SKIPPED_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE']);
 const SCANNED_INPUT_TYPES = new Set(['text', 'email', 'password', 'tel']);
 
 /** Marks DOMGuard's own overlays so a scan never picks up its own output. */
-const GUARD_ATTRIBUTE = 'data-domguard';
-const GUARD_SELECTOR = `[${GUARD_ATTRIBUTE}]`;
+export const GUARD_ATTRIBUTE = 'data-domguard';
+export const GUARD_SELECTOR = `[${GUARD_ATTRIBUTE}]`;
 
 // Reset on every scan: layout and styles can change between runs.
 let skipCache = new WeakMap<Element, boolean>();
@@ -75,16 +88,16 @@ function toDocumentRect(rect: DOMRect): DOMRect {
   );
 }
 
-/** Rectangles covering [start, end) of a text node, in document space. */
-function rectsForTextRange(node: Text, start: number, end: number): DOMRect[] {
+/** A Range covering [start, end) of a text node, or null if the offsets are stale. */
+function rangeForText(node: Text, start: number, end: number): Range | null {
   const range = document.createRange();
   try {
     range.setStart(node, start);
     range.setEnd(node, end);
-    return Array.from(range.getClientRects(), toDocumentRect);
+    return range;
   } catch {
     // The DOM can change between batches, which invalidates these offsets.
-    return [];
+    return null;
   }
 }
 
@@ -139,11 +152,15 @@ function scanTextNode(node: Text, into: PageMatch[]): void {
   // TODO: matches split across sibling nodes (e.g. a card number wrapped in
   // <span>s) are not detected yet; that needs a flattened per-block text buffer.
   for (const match of findSensitive(text)) {
+    const range = rangeForText(node, match.start, match.end);
+    if (!range) {
+      continue;
+    }
     into.push({
       id: match.id,
       label: match.label,
-      rects: rectsForTextRange(node, match.start, match.end),
-      target: node,
+      rects: Array.from(range.getClientRects(), toDocumentRect),
+      target: { kind: 'range', range },
     });
   }
 }
@@ -155,7 +172,11 @@ function scanField(field: HTMLInputElement | HTMLTextAreaElement, into: PageMatc
 
   if (field instanceof HTMLInputElement && field.type === 'password') {
     // Never read a password value; the whole field becomes the mask target.
-    into.push({ ...PASSWORD_FIELD, rects: elementRects(field), target: field });
+    into.push({
+      ...PASSWORD_FIELD,
+      rects: elementRects(field),
+      target: { kind: 'element', element: field },
+    });
     return;
   }
 
@@ -172,7 +193,12 @@ function scanField(field: HTMLInputElement | HTMLTextAreaElement, into: PageMatc
       continue;
     }
     seen.add(match.id);
-    into.push({ id: match.id, label: match.label, rects, target: field });
+    into.push({
+      id: match.id,
+      label: match.label,
+      rects,
+      target: { kind: 'element', element: field },
+    });
   }
 }
 

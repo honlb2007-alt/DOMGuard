@@ -10,7 +10,14 @@
     <main class="w-80 p-4">
       <h1 class="text-lg font-semibold text-slate-900">DOMGuard</h1>
       <p class="mt-1 text-sm text-slate-600">Messaging wired up — feature logic still pending.</p>
-      <div class="mt-4 flex flex-col gap-2">
+      <label class="mt-4 flex items-center justify-between gap-2 text-sm text-slate-700">
+        <span>遮罩樣式</span>
+        <select id="mask-style" class="rounded border border-slate-300 px-2 py-1 text-sm">
+          <option value="black">黑色色塊</option>
+          <option value="blur">模糊</option>
+        </select>
+      </label>
+      <div class="mt-3 flex flex-col gap-2">
         <button id="scan-and-mask" type="button" class="rounded bg-slate-900 px-3 py-2 text-sm text-white">
           Scan &amp; Mask
         </button>
@@ -18,7 +25,7 @@
           Clear Masks
         </button>
         <button id="toggle-picker" type="button" class="rounded border border-slate-300 px-3 py-2 text-sm">
-          Toggle Picker
+          手動選取遮蔽：關閉
         </button>
         <button id="detect-hidden-text" type="button" class="rounded border border-slate-300 px-3 py-2 text-sm">
           Detect Hidden Text

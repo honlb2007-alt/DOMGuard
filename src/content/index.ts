@@ -2,16 +2,22 @@
 // chrome.scripting.executeScript (activeTab), never through manifest
 // content_scripts.
 
-import './masker';
 import './hidden-text';
-import './picker';
 
+import {
+  applyMasks,
+  clearMasks as clearAllMasks,
+  maskCount,
+  setRescanRequestHandler,
+  updateMaskStyle,
+} from './masker';
+import { stopPicker, togglePicker as toggleElementPicker } from './picker';
 import { scanPage, type PageMatch } from './scanner';
 import {
   toErrorResponse,
-  type ContentMessageType,
   type ExtensionMessage,
   type ExtensionResponse,
+  type MaskStyle,
   type ResponseFor,
 } from '../shared/messages';
 
@@ -21,33 +27,45 @@ type GlobalWithFlag = typeof globalThis & Record<typeof INJECTION_FLAG, boolean 
 
 const globalWithFlag = globalThis as GlobalWithFlag;
 
-let pickerActive = false;
-
-/** Latest scan, kept so masking can reuse it without re-scanning the page. */
+/** Latest scan, kept so a restyle or redraw does not need to rescan. */
 let lastScan: PageMatch[] = [];
 
-async function scanAndMask(): Promise<ResponseFor<'SCAN_AND_MASK'>> {
+/** Style used by the next scan and by manually picked masks. */
+let maskStyle: MaskStyle = 'black';
+
+async function runScan(style: MaskStyle): Promise<ResponseFor<'SCAN_AND_MASK'>> {
+  maskStyle = style;
   lastScan = await scanPage();
+  applyMasks(lastScan, style);
 
   const byType: Record<string, number> = {};
   for (const match of lastScan) {
     byType[match.label] = (byType[match.label] ?? 0) + 1;
   }
-  // TODO (Task A-3): apply the masks using lastScan before responding.
   return { ok: true, count: lastScan.length, byType };
 }
 
+function scanAndMask(style: MaskStyle | undefined): Promise<ResponseFor<'SCAN_AND_MASK'>> {
+  return runScan(style ?? maskStyle);
+}
+
+function restyleMasks(style: MaskStyle): ResponseFor<'UPDATE_MASK_STYLE'> {
+  maskStyle = style;
+  updateMaskStyle(style);
+  return { ok: true, style };
+}
+
 function clearMasks(): ResponseFor<'CLEAR_MASKS'> {
-  // TODO (Task A): restore every masked node to its original text.
-  const clearedCount = lastScan.length;
+  const clearedCount = maskCount();
+  // The picker shares the overlay host, so it has to stop before teardown.
+  stopPicker();
+  clearAllMasks();
   lastScan = [];
   return { ok: true, clearedCount };
 }
 
 function togglePicker(): ResponseFor<'TOGGLE_PICKER'> {
-  // TODO: attach / detach the hover-and-click element picker.
-  pickerActive = !pickerActive;
-  return { ok: true, pickerActive };
+  return { ok: true, active: toggleElementPicker() };
 }
 
 function detectHiddenText(): ResponseFor<'DETECT_HIDDEN_TEXT'> {
@@ -65,10 +83,12 @@ function restoreAfterCapture(): ResponseFor<'RESTORE_AFTER_CAPTURE'> {
   return { ok: true, restoredCount: 0 };
 }
 
-async function dispatch(type: ContentMessageType): Promise<ExtensionResponse> {
-  switch (type) {
+async function handleMessage(message: ExtensionMessage): Promise<ExtensionResponse> {
+  switch (message.type) {
     case 'SCAN_AND_MASK':
-      return scanAndMask();
+      return scanAndMask(message.style);
+    case 'UPDATE_MASK_STYLE':
+      return restyleMasks(message.style);
     case 'CLEAR_MASKS':
       return clearMasks();
     case 'TOGGLE_PICKER':
@@ -79,18 +99,20 @@ async function dispatch(type: ContentMessageType): Promise<ExtensionResponse> {
       return sanitizeBeforeCapture();
     case 'RESTORE_AFTER_CAPTURE':
       return restoreAfterCapture();
+    case 'CAPTURE_SCREENSHOT':
+    case 'CHECK_PRO':
+      return { ok: false, error: `${message.type} is handled by the service worker.` };
   }
-}
-
-async function handleMessage(message: ExtensionMessage): Promise<ExtensionResponse> {
-  if (message.type === 'CAPTURE_SCREENSHOT' || message.type === 'CHECK_PRO') {
-    return { ok: false, error: `${message.type} is handled by the service worker.` };
-  }
-  return dispatch(message.type);
 }
 
 if (globalWithFlag[INJECTION_FLAG] !== true) {
   globalWithFlag[INJECTION_FLAG] = true;
+
+  // A structural page change can reveal new content, so the masker asks for a
+  // debounced rescan rather than re-running patterns on every mutation.
+  setRescanRequestHandler(() => {
+    void runScan(maskStyle);
+  });
 
   chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
     // Scanning batches across idle callbacks, so the channel must stay open.

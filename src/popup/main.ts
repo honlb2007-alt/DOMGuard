@@ -1,28 +1,44 @@
 import {
+  MASK_STYLES,
   sendToBackground,
   toErrorResponse,
   type ExtensionMessage,
   type ExtensionResponse,
+  type MaskStyle,
   type MessageType,
 } from '../shared/messages';
 
-const BUTTON_MESSAGES: ReadonlyArray<readonly [elementId: string, type: MessageType]> = [
-  ['scan-and-mask', 'SCAN_AND_MASK'],
-  ['clear-masks', 'CLEAR_MASKS'],
-  ['toggle-picker', 'TOGGLE_PICKER'],
-  ['detect-hidden-text', 'DETECT_HIDDEN_TEXT'],
-  ['sanitize-before-capture', 'SANITIZE_BEFORE_CAPTURE'],
-  ['restore-after-capture', 'RESTORE_AFTER_CAPTURE'],
-  ['capture-screenshot', 'CAPTURE_SCREENSHOT'],
-  ['check-pro', 'CHECK_PRO'],
+/** Buttons whose message needs no payload beyond its type. */
+const SIMPLE_BUTTONS: ReadonlyArray<readonly [elementId: string, message: ExtensionMessage]> = [
+  ['clear-masks', { type: 'CLEAR_MASKS' }],
+  ['detect-hidden-text', { type: 'DETECT_HIDDEN_TEXT' }],
+  ['sanitize-before-capture', { type: 'SANITIZE_BEFORE_CAPTURE' }],
+  ['restore-after-capture', { type: 'RESTORE_AFTER_CAPTURE' }],
+  ['capture-screenshot', { type: 'CAPTURE_SCREENSHOT' }],
+  ['check-pro', { type: 'CHECK_PRO' }],
 ];
 
+const PICKER_LABEL = '手動選取遮蔽';
+
 const statusEl = document.getElementById('status');
+const styleSelect = document.getElementById('mask-style');
+const pickerButton = document.getElementById('toggle-picker');
 
 function setStatus(text: string): void {
   if (statusEl) {
     statusEl.textContent = text;
   }
+}
+
+function setPickerLabel(active: boolean): void {
+  if (pickerButton) {
+    pickerButton.textContent = `${PICKER_LABEL}：${active ? '啟用中' : '關閉'}`;
+  }
+}
+
+function selectedStyle(): MaskStyle {
+  const value = styleSelect instanceof HTMLSelectElement ? styleSelect.value : '';
+  return MASK_STYLES.find((style) => style === value) ?? 'black';
 }
 
 function formatValue(value: unknown): string {
@@ -58,25 +74,65 @@ function describe(type: MessageType, response: ExtensionResponse): string {
   return detail ? `${type} ok — ${detail}` : `${type} ok`;
 }
 
-async function run(button: HTMLButtonElement, type: MessageType): Promise<void> {
-  button.disabled = true;
-  setStatus(`${type}…`);
+/** Send a message, report the outcome in the status bar, and hand it back. */
+async function send(
+  message: ExtensionMessage,
+  button?: HTMLButtonElement,
+): Promise<ExtensionResponse> {
+  if (button) {
+    button.disabled = true;
+  }
+  setStatus(`${message.type}…`);
   try {
-    const response = await sendToBackground({ type } as ExtensionMessage);
-    setStatus(describe(type, response));
+    const response = await sendToBackground(message);
+    setStatus(describe(message.type, response));
+    return response;
   } catch (error) {
-    setStatus(describe(type, toErrorResponse(error)));
+    const response = toErrorResponse(error);
+    setStatus(describe(message.type, response));
+    return response;
   } finally {
-    button.disabled = false;
+    if (button) {
+      button.disabled = false;
+    }
   }
 }
 
-for (const [elementId, type] of BUTTON_MESSAGES) {
-  const button = document.getElementById(elementId);
-  if (!(button instanceof HTMLButtonElement)) {
-    continue;
-  }
-  button.addEventListener('click', () => {
-    void run(button, type);
+function button(elementId: string): HTMLButtonElement | null {
+  const element = document.getElementById(elementId);
+  return element instanceof HTMLButtonElement ? element : null;
+}
+
+for (const [elementId, message] of SIMPLE_BUTTONS) {
+  const element = button(elementId);
+  element?.addEventListener('click', () => {
+    void (async () => {
+      await send(message, element);
+      if (message.type === 'CLEAR_MASKS') {
+        // Clearing also tears down the picker, so keep the label honest.
+        setPickerLabel(false);
+      }
+    })();
+  });
+}
+
+const scanButton = button('scan-and-mask');
+scanButton?.addEventListener('click', () => {
+  void send({ type: 'SCAN_AND_MASK', style: selectedStyle() }, scanButton);
+});
+
+const pickerToggle = button('toggle-picker');
+pickerToggle?.addEventListener('click', () => {
+  void (async () => {
+    const response = await send({ type: 'TOGGLE_PICKER' }, pickerToggle);
+    if (response.ok && 'active' in response) {
+      setPickerLabel(response.active);
+    }
+  })();
+});
+
+if (styleSelect instanceof HTMLSelectElement) {
+  styleSelect.addEventListener('change', () => {
+    void send({ type: 'UPDATE_MASK_STYLE', style: selectedStyle() });
   });
 }

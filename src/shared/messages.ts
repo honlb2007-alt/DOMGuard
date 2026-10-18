@@ -3,8 +3,19 @@
 // worker either answers it directly or forwards it to the content script of
 // the active tab.
 
+export type MaskStyle = 'black' | 'blur';
+
+export const MASK_STYLES: readonly MaskStyle[] = ['black', 'blur'];
+
 export interface ScanAndMaskMessage {
   type: 'SCAN_AND_MASK';
+  /** Defaults to the style already in use on the page, initially 'black'. */
+  style?: MaskStyle;
+}
+
+export interface UpdateMaskStyleMessage {
+  type: 'UPDATE_MASK_STYLE';
+  style: MaskStyle;
 }
 
 export interface ClearMasksMessage {
@@ -37,6 +48,7 @@ export interface CheckProMessage {
 
 export type ExtensionMessage =
   | ScanAndMaskMessage
+  | UpdateMaskStyleMessage
   | ClearMasksMessage
   | TogglePickerMessage
   | DetectHiddenTextMessage
@@ -54,6 +66,11 @@ export interface ScanAndMaskResponse {
   byType: Record<string, number>;
 }
 
+export interface UpdateMaskStyleResponse {
+  ok: true;
+  style: MaskStyle;
+}
+
 export interface ClearMasksResponse {
   ok: true;
   clearedCount: number;
@@ -61,7 +78,7 @@ export interface ClearMasksResponse {
 
 export interface TogglePickerResponse {
   ok: true;
-  pickerActive: boolean;
+  active: boolean;
 }
 
 export interface DetectHiddenTextResponse {
@@ -97,6 +114,7 @@ export interface ErrorResponse {
 /** Successful response shape for each message type. */
 export interface SuccessResponseMap {
   SCAN_AND_MASK: ScanAndMaskResponse;
+  UPDATE_MASK_STYLE: UpdateMaskStyleResponse;
   CLEAR_MASKS: ClearMasksResponse;
   TOGGLE_PICKER: TogglePickerResponse;
   DETECT_HIDDEN_TEXT: DetectHiddenTextResponse;
