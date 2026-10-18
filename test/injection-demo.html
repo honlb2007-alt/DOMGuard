@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DOMGuard hidden-text demo (test data only)</title>
+    <style>
+      body {
+        margin: 0 auto;
+        max-width: 46rem;
+        padding: 2rem 1.5rem 4rem;
+        background: #ffffff;
+        color: #111827;
+        font: 15px/1.6 system-ui, -apple-system, 'Segoe UI', sans-serif;
+      }
+      h1 {
+        font-size: 1.5rem;
+        margin-bottom: 0.25rem;
+      }
+      h2 {
+        margin-top: 2rem;
+        font-size: 1rem;
+      }
+      .note {
+        border-left: 3px solid #111827;
+        background: #f3f4f6;
+        padding: 0.75rem 1rem;
+        font-size: 0.9rem;
+      }
+      code {
+        font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+        font-size: 0.85em;
+      }
+      .case {
+        border-top: 1px solid #e5e7eb;
+        padding: 0.6rem 0;
+      }
+      .case-label {
+        font-size: 0.8rem;
+        color: #374151;
+      }
+
+      /* Case 1: one step away from the page background. */
+      .case-1 {
+        color: #fffffe;
+        background: #ffffff;
+      }
+      /* Case 2: light grey on white, roughly 1.1:1. */
+      .case-2 {
+        color: #f2f2f2;
+        background: #ffffff;
+      }
+      /* Case 3: too small to read but still painted. */
+      .case-3 {
+        font-size: 1px;
+      }
+      /* Case 4: parked outside the document. */
+      .case-4 {
+        position: absolute;
+        left: -9999px;
+      }
+      /* Case 5: almost fully transparent. */
+      .case-5 {
+        opacity: 0.02;
+      }
+
+      /* Case 6 controls: readable text that must NOT be reported. */
+      .control-grey {
+        color: #767676;
+        background: #ffffff;
+      }
+      .control-small {
+        font-size: 12px;
+      }
+
+      /* Case 7 controls: readable text over an image and a gradient. The
+         contrast check cannot judge these, so it skips them rather than
+         guessing. They must not be reported either. */
+      .control-gradient {
+        background: linear-gradient(90deg, #dbeafe, #fef3c7);
+        padding: 0.75rem;
+        color: #111827;
+      }
+      .control-image {
+        /* Inline SVG data URI keeps this page dependency-free. */
+        background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="%23e5e7eb"/><circle cx="20" cy="20" r="8" fill="%23cbd5e1"/></svg>');
+        padding: 0.75rem;
+        color: #111827;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>DOMGuard hidden-text demo</h1>
+    <p class="note">
+      Test page only. Every string below is harmless and every value is fake. Each hidden case
+      carries a different number so you can tell from the popup which one was detected.
+    </p>
+
+    <p>
+      This paragraph is ordinary black body text on a white background. It is perfectly readable, so
+      it must never appear in the scan results. The five cases below are invisible or unreadable to
+      a person, yet all of them are still painted into a screenshot.
+    </p>
+
+    <h2>Cases that should be detected</h2>
+
+    <div class="case">
+      <span class="case-label">Case 1 — <code>#FFFFFE</code> text on <code>#FFFFFF</code></span>
+      <p class="case-1">TEST ONLY - case 1 hidden instruction demo</p>
+    </div>
+
+    <div class="case">
+      <span class="case-label">Case 2 — <code>#F2F2F2</code> text on <code>#FFFFFF</code></span>
+      <p class="case-2">TEST ONLY - case 2 hidden instruction demo</p>
+    </div>
+
+    <div class="case">
+      <span class="case-label">Case 3 — <code>font-size: 1px</code></span>
+      <p class="case-3">TEST ONLY - case 3 hidden instruction demo</p>
+    </div>
+
+    <div class="case">
+      <span class="case-label">Case 4 — <code>position: absolute; left: -9999px</code></span>
+      <p class="case-4">TEST ONLY - case 4 hidden instruction demo</p>
+    </div>
+
+    <div class="case">
+      <span class="case-label">Case 5 — <code>opacity: 0.02</code></span>
+      <p class="case-5">TEST ONLY - case 5 hidden instruction demo</p>
+    </div>
+
+    <h2>Case 6 controls: readable text, must not be detected</h2>
+
+    <div class="case">
+      <span class="case-label">Grey caption at roughly 4.5:1</span>
+      <p class="control-grey">
+        Control A - this grey caption is readable and must stay out of the results.
+      </p>
+    </div>
+
+    <div class="case">
+      <span class="case-label">Ordinary black body text</span>
+      <p>Control B - this black paragraph is readable and must stay out of the results.</p>
+    </div>
+
+    <div class="case">
+      <span class="case-label">Small but legible 12px text</span>
+      <p class="control-small">
+        Control C - this 12px text is small but legible and must stay out of the results.
+      </p>
+    </div>
+
+    <h2>Case 7 controls: text over a gradient and an image</h2>
+
+    <div class="case">
+      <div class="control-gradient">
+        <p>Control D - readable text over a gradient background, must stay out of the results.</p>
+      </div>
+    </div>
+
+    <div class="case">
+      <div class="control-image">
+        <p>Control E - readable text over a background image, must stay out of the results.</p>
+      </div>
+    </div>
+
+    <h2>Fake sensitive data for mask and screenshot testing</h2>
+    <p>
+      Receipt sent to test.user@example.com, card 4242 4242 4242 4242 on file, deploy key
+      <code>sk-FAKE0000testkey0000testkey0000testkey0000testk</code>.
+    </p>
+    <p>Backup contact 0912-345-678, secondary mailbox qa+domguard@example.org.</p>
+  </body>
+</html>

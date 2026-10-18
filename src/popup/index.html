@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-Hant">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -9,7 +9,7 @@
   <body>
     <main class="w-80 p-4">
       <h1 class="text-lg font-semibold text-slate-900">DOMGuard</h1>
-      <p class="mt-1 text-sm text-slate-600">Messaging wired up — feature logic still pending.</p>
+      <p class="mt-1 text-sm text-slate-600">Mask sensitive data on the current tab.</p>
       <label class="mt-4 flex items-center justify-between gap-2 text-sm text-slate-700">
         <span>Mask style</span>
         <select id="mask-style" class="rounded border border-slate-300 px-2 py-1 text-sm">
@@ -28,7 +28,7 @@
           Manual picker: off
         </button>
         <button id="detect-hidden-text" type="button" class="rounded border border-slate-300 px-3 py-2 text-sm">
-          Detect Hidden Text
+          Scan Hidden Text
         </button>
         <button id="sanitize-before-capture" type="button" class="rounded border border-slate-300 px-3 py-2 text-sm">
           Sanitize Before Capture
@@ -46,6 +46,8 @@
       <p id="status" class="mt-4 min-h-10 rounded bg-slate-100 px-3 py-2 text-xs text-slate-700">
         Ready.
       </p>
+      <!-- Filled only by main.ts, with createElement and textContent. -->
+      <ul id="hidden-text-findings" class="mt-2 flex flex-col gap-1 text-xs"></ul>
     </main>
     <script type="module" src="./main.ts"></script>
   </body>

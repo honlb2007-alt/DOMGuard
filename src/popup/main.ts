@@ -4,6 +4,8 @@ import {
   toErrorResponse,
   type ExtensionMessage,
   type ExtensionResponse,
+  type HiddenFindingReport,
+  type HiddenReason,
   type MaskStyle,
   type MessageType,
 } from '../shared/messages';
@@ -11,7 +13,6 @@ import {
 /** Buttons whose message needs no payload beyond its type. */
 const SIMPLE_BUTTONS: ReadonlyArray<readonly [elementId: string, message: ExtensionMessage]> = [
   ['clear-masks', { type: 'CLEAR_MASKS' }],
-  ['detect-hidden-text', { type: 'DETECT_HIDDEN_TEXT' }],
   ['sanitize-before-capture', { type: 'SANITIZE_BEFORE_CAPTURE' }],
   ['restore-after-capture', { type: 'RESTORE_AFTER_CAPTURE' }],
   ['capture-screenshot', { type: 'CAPTURE_SCREENSHOT' }],
@@ -20,9 +21,28 @@ const SIMPLE_BUTTONS: ReadonlyArray<readonly [elementId: string, message: Extens
 
 const PICKER_LABEL = 'Manual picker';
 
+const HIDDEN_TEXT_LABEL = 'Scan Hidden Text';
+
+/** Shown for any failure; internal error detail never reaches the popup. */
+const SCAN_FAILED_MESSAGE = 'Scan failed. Please try again.';
+
+/** Long lists make the popup unusable, so the rest is summarised. */
+const MAX_LISTED_FINDINGS = 20;
+
+const REASON_LABELS: Record<HiddenReason, string> = {
+  low_contrast: 'Low contrast',
+  tiny_font: 'Tiny font',
+  transparent: 'Nearly transparent',
+  hidden_visibility: 'Invisible',
+  zero_size: 'Zero size',
+  offscreen: 'Off-screen',
+  clipped: 'Clipped',
+};
+
 const statusEl = document.getElementById('status');
 const styleSelect = document.getElementById('mask-style');
 const pickerButton = document.getElementById('toggle-picker');
+const findingsList = document.getElementById('hidden-text-findings');
 
 function setStatus(text: string): void {
   if (statusEl) {
@@ -64,19 +84,55 @@ function describeScan(response: ExtensionResponse & { ok: true }): string {
   return `Found ${response.count} match(es): ${tally(response.byType)}`;
 }
 
-function describeHiddenText(response: ExtensionResponse & { ok: true }): string {
-  if (!('findings' in response)) {
-    return 'DETECT_HIDDEN_TEXT ok';
+/** `Low contrast (ratio 1.02)` */
+function reasonLabel(finding: HiddenFindingReport): string {
+  const label = REASON_LABELS[finding.reason] ?? finding.reason;
+  if (finding.reason === 'low_contrast' && typeof finding.contrastRatio === 'number') {
+    return `${label} (ratio ${finding.contrastRatio.toFixed(2)})`;
   }
-  if (response.count === 0) {
-    return 'No hidden text found.';
+  return label;
+}
+
+/**
+ * Render the findings list. Previews are untrusted page content, so every node
+ * is built with createElement and every string assigned through textContent.
+ * No markup is ever parsed here.
+ */
+function renderFindings(findings: HiddenFindingReport[]): void {
+  if (!findingsList) {
+    return;
   }
-  // Previews hold page text, so the status bar reports reasons only.
-  const byReason: Record<string, number> = {};
-  for (const finding of response.findings) {
-    byReason[finding.reason] = (byReason[finding.reason] ?? 0) + 1;
+  const items: HTMLLIElement[] = [];
+  for (const finding of findings.slice(0, MAX_LISTED_FINDINGS)) {
+    const item = document.createElement('li');
+    item.className = 'rounded border border-slate-200 px-2 py-1';
+
+    const label = document.createElement('span');
+    label.className = 'block font-medium text-slate-800';
+    label.textContent = reasonLabel(finding);
+
+    const preview = document.createElement('span');
+    preview.className = 'block break-words text-slate-500';
+    preview.textContent = finding.preview;
+
+    item.append(label, preview);
+    items.push(item);
   }
-  return `Found ${response.count} hidden text element(s): ${tally(byReason)}`;
+
+  const remaining = findings.length - items.length;
+  if (remaining > 0) {
+    const more = document.createElement('li');
+    more.className = 'px-2 py-1 text-slate-500';
+    more.textContent = `and ${remaining} more`;
+    items.push(more);
+  }
+
+  // Replaces the previous results in one step, leaving nothing stale behind.
+  findingsList.replaceChildren(...items);
+}
+
+function clearFindings(): void {
+  findingsList?.replaceChildren();
 }
 
 function describe(type: MessageType, response: ExtensionResponse): string {
@@ -85,9 +141,6 @@ function describe(type: MessageType, response: ExtensionResponse): string {
   }
   if (type === 'SCAN_AND_MASK') {
     return describeScan(response);
-  }
-  if (type === 'DETECT_HIDDEN_TEXT') {
-    return describeHiddenText(response);
   }
   const detail = Object.entries(response)
     .filter(([key]) => key !== 'ok')
@@ -137,6 +190,40 @@ for (const [elementId, message] of SIMPLE_BUTTONS) {
     })();
   });
 }
+
+/** Hidden-text scan: own handler because it renders a list, not a status line. */
+async function scanHiddenText(target: HTMLButtonElement): Promise<void> {
+  // TODO (Task C): this is a Pro feature. The service worker will verify the
+  // ExtensionPay entitlement before handling DETECT_HIDDEN_TEXT, so the popup
+  // must not be the only thing gating access.
+  target.disabled = true;
+  target.textContent = 'Scanning…';
+  clearFindings();
+  setStatus('Scanning for hidden text…');
+  try {
+    const response = await sendToBackground({ type: 'DETECT_HIDDEN_TEXT' });
+    if (!response.ok) {
+      setStatus(SCAN_FAILED_MESSAGE);
+      return;
+    }
+    setStatus(
+      response.count === 0
+        ? 'No hidden text found'
+        : `${response.count} hidden text item(s) detected`,
+    );
+    renderFindings(response.findings);
+  } catch {
+    setStatus(SCAN_FAILED_MESSAGE);
+  } finally {
+    target.disabled = false;
+    target.textContent = HIDDEN_TEXT_LABEL;
+  }
+}
+
+const hiddenTextButton = button('detect-hidden-text');
+hiddenTextButton?.addEventListener('click', () => {
+  void scanHiddenText(hiddenTextButton);
+});
 
 const scanButton = button('scan-and-mask');
 scanButton?.addEventListener('click', () => {
