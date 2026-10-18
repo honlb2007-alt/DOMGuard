@@ -57,7 +57,10 @@ if (!existsSync(path.join(distDir, 'manifest.json'))) {
   process.exit(1);
 }
 
-const files = walk(distDir);
+const files = walk(distDir).filter((file) => {
+  const name = path.relative(distDir, file).split(path.sep).join('/');
+  return name !== 'privacy-site' && !name.startsWith('privacy-site/');
+});
 const maps = files.filter((file) => file.endsWith('.map'));
 if (maps.length > 0) {
   console.error('Refusing to pack source maps:');
