@@ -13,5 +13,5 @@
     "forceConsistentCasingInFileNames": true,
     "types": ["chrome", "vite/client"]
   },
-  "include": ["src", "vite.config.ts", "manifest.json"]
+  "include": ["src", "vite.config.ts", "vite.content.config.ts", "manifest.json"]
 }

@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DOMGuard — 測試頁面（全部為假資料）</title>
+    <style>
+      body {
+        margin: 0 auto;
+        max-width: 48rem;
+        padding: 2rem 1.5rem 4rem;
+        background: #ffffff;
+        color: #0f172a;
+        font: 15px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      h1 {
+        font-size: 1.4rem;
+      }
+      h2 {
+        margin-top: 2rem;
+        font-size: 1.05rem;
+      }
+      .note {
+        border-left: 3px solid #0f172a;
+        background: #f1f5f9;
+        padding: 0.75rem 1rem;
+        font-size: 0.9rem;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      th,
+      td {
+        border: 1px solid #cbd5e1;
+        padding: 0.5rem 0.75rem;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: #f8fafc;
+        white-space: nowrap;
+      }
+      code {
+        font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+        font-size: 0.85em;
+        word-break: break-all;
+      }
+
+      /* 以下為任務 B 的隱藏文字樣本：肉眼看不到，但仍存在於 DOM 與螢幕截圖的像素中。 */
+      .h-display {
+        display: none;
+      }
+      .h-visibility {
+        visibility: hidden;
+      }
+      .h-opacity {
+        opacity: 0;
+      }
+      .h-zero-font {
+        font-size: 0;
+      }
+      .h-offscreen {
+        position: absolute;
+        left: -9999px;
+        top: auto;
+      }
+      .h-clip {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+      }
+      .h-same-color {
+        color: #ffffff;
+        background: #ffffff;
+      }
+      .h-tiny-alpha {
+        color: rgba(15, 23, 42, 0.02);
+      }
+    </style>
+  </head>
+  <body>
+    <h1>DOMGuard 測試頁面</h1>
+    <p class="note">
+      本頁所有數值皆為公開的測試用假資料，不對應任何真實帳號、人員或金流。僅用於驗證掃描、遮蔽與隱藏文字偵測。
+    </p>
+
+    <h2>1. 可見的敏感資料樣本</h2>
+    <table>
+      <tbody>
+        <tr>
+          <th>Email</th>
+          <td><code>test.user@example.com</code></td>
+        </tr>
+        <tr>
+          <th>Email（別名格式）</th>
+          <td><code>qa+domguard@example.org</code></td>
+        </tr>
+        <tr>
+          <th>台灣手機號碼</th>
+          <td><code>0912-345-678</code></td>
+        </tr>
+        <tr>
+          <th>台灣手機號碼（國際碼）</th>
+          <td><code>+886 987 654 321</code></td>
+        </tr>
+        <tr>
+          <th>信用卡號（Luhn 有效測試卡）</th>
+          <td><code>4242 4242 4242 4242</code></td>
+        </tr>
+        <tr>
+          <th>信用卡號（無分隔）</th>
+          <td><code>5555555555554444</code></td>
+        </tr>
+        <tr>
+          <th>API Key（sk- 開頭）</th>
+          <td><code>sk-FAKE0000testkey0000testkey0000testkey0000testk</code></td>
+        </tr>
+        <tr>
+          <th>JWT</th>
+          <td>
+            <code
+              >eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IlRlc3QgVXNlciIsImlhdCI6MTUxNjIzOTAyMn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c</code
+            >
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>2. 混在自然語句中的樣本</h2>
+    <p>
+      客服回覆：您好，我們已將收據寄到 test.user@example.com，若未收到請回電 0912-345-678。本次交易使用的卡片末四碼來自
+      4242 4242 4242 4242。
+    </p>
+    <p>
+      工程備註：請將 <code>sk-FAKE0000testkey0000testkey0000testkey0000testk</code> 換成環境變數，並停用舊的 Bearer
+      token。
+    </p>
+
+    <h2>3. 隱藏文字樣本（任務 B）</h2>
+    <p>這一段下方有 8 個肉眼看不見的節點，各自使用不同的隱藏手法：</p>
+    <div>
+      <span class="h-display">display-none 洩漏：test.user@example.com</span>
+      <span class="h-visibility">visibility-hidden 洩漏：0912-345-678</span>
+      <span class="h-opacity">opacity-0 洩漏：4242 4242 4242 4242</span>
+      <span class="h-zero-font">font-size-0 洩漏：sk-FAKE0000testkey0000testkey0000testkey0000testk</span>
+      <span class="h-offscreen">off-screen 洩漏：qa+domguard@example.org</span>
+      <span class="h-clip">clip-path 洩漏：+886 987 654 321</span>
+      <span class="h-same-color">same-color 洩漏：5555555555554444</span>
+      <span class="h-tiny-alpha"
+        >low-alpha 洩漏：eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.ZmFrZXNpZ25hdHVyZQ</span
+      >
+    </div>
+
+    <h2>4. 不應被誤判的對照樣本</h2>
+    <table>
+      <tbody>
+        <tr>
+          <th>Luhn 無效的卡號</th>
+          <td><code>4242 4242 4242 4241</code></td>
+        </tr>
+        <tr>
+          <th>訂單編號（16 位數字但非卡號）</th>
+          <td><code>2024031500012345</code></td>
+        </tr>
+        <tr>
+          <th>版本字串</th>
+          <td><code>sk-</code> 這個前綴本身不是金鑰</td>
+        </tr>
+        <tr>
+          <th>一般電話</th>
+          <td><code>02-2345-6789</code></td>
+        </tr>
+      </tbody>
+    </table>
+  </body>
+</html>
