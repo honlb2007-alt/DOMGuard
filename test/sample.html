@@ -175,5 +175,40 @@
         </tr>
       </tbody>
     </table>
+
+    <h2>5. 輸入欄位樣本（任務 A-2）</h2>
+    <p>密碼欄位不應被讀值，只會被整欄標記；<code>type="hidden"</code> 與 <code>type="number"</code> 不在掃描範圍。</p>
+    <form onsubmit="return false">
+      <p>
+        <label>text：<input type="text" size="40" value="聯絡信箱 test.user@example.com" /></label>
+      </p>
+      <p>
+        <label>email：<input type="email" size="40" value="qa+domguard@example.org" /></label>
+      </p>
+      <p>
+        <label>tel：<input type="tel" size="40" value="0912-345-678" /></label>
+      </p>
+      <p>
+        <label>password：<input type="password" size="40" value="not-a-real-password" /></label>
+      </p>
+      <p>
+        <label
+          >textarea：
+          <textarea rows="3" cols="46">
+金鑰 sk-FAKE0000testkey0000testkey0000testkey0000testk 與卡號 4242 4242 4242 4242</textarea
+          ></label
+        >
+      </p>
+      <p>
+        <label>number（不掃描）：<input type="number" value="4242424242424242" /></label>
+      </p>
+      <input type="hidden" value="test.user@example.com" />
+    </form>
+
+    <h2>6. DOMGuard 自身容器（應被跳過）</h2>
+    <p>帶有 <code>data-domguard</code> 屬性的子樹代表擴充功能自己畫的遮罩，掃描時必須忽略：</p>
+    <div data-domguard="mask-layer">
+      <p>這裡的 test.user@example.com 與 4242 4242 4242 4242 都不該被計入結果。</p>
+    </div>
   </body>
 </html>

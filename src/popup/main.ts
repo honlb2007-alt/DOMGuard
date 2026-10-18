@@ -30,9 +30,26 @@ function formatValue(value: unknown): string {
   return text.length > 60 ? `${text.slice(0, 57)}…` : text;
 }
 
+function describeScan(response: ExtensionResponse & { ok: true }): string {
+  if (!('count' in response)) {
+    return 'SCAN_AND_MASK ok';
+  }
+  if (response.count === 0) {
+    return '沒有找到敏感資訊';
+  }
+  const breakdown = Object.entries(response.byType)
+    .sort(([, a], [, b]) => b - a)
+    .map(([label, count]) => `${label} ${count}`)
+    .join('、');
+  return `找到 ${response.count} 處敏感資訊：${breakdown}`;
+}
+
 function describe(type: MessageType, response: ExtensionResponse): string {
   if (!response.ok) {
     return `${type} failed: ${response.error}`;
+  }
+  if (type === 'SCAN_AND_MASK') {
+    return describeScan(response);
   }
   const detail = Object.entries(response)
     .filter(([key]) => key !== 'ok')

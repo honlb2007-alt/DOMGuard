@@ -2,11 +2,11 @@
 // chrome.scripting.executeScript (activeTab), never through manifest
 // content_scripts.
 
-import './scanner';
 import './masker';
 import './hidden-text';
 import './picker';
 
+import { scanPage, type PageMatch } from './scanner';
 import {
   toErrorResponse,
   type ContentMessageType,
@@ -23,14 +23,25 @@ const globalWithFlag = globalThis as GlobalWithFlag;
 
 let pickerActive = false;
 
-function scanAndMask(): ResponseFor<'SCAN_AND_MASK'> {
-  // TODO (Task A): scan with shared patterns, then mask the matched nodes.
-  return { ok: true, maskedCount: 0 };
+/** Latest scan, kept so masking can reuse it without re-scanning the page. */
+let lastScan: PageMatch[] = [];
+
+async function scanAndMask(): Promise<ResponseFor<'SCAN_AND_MASK'>> {
+  lastScan = await scanPage();
+
+  const byType: Record<string, number> = {};
+  for (const match of lastScan) {
+    byType[match.label] = (byType[match.label] ?? 0) + 1;
+  }
+  // TODO (Task A-3): apply the masks using lastScan before responding.
+  return { ok: true, count: lastScan.length, byType };
 }
 
 function clearMasks(): ResponseFor<'CLEAR_MASKS'> {
   // TODO (Task A): restore every masked node to its original text.
-  return { ok: true, clearedCount: 0 };
+  const clearedCount = lastScan.length;
+  lastScan = [];
+  return { ok: true, clearedCount };
 }
 
 function togglePicker(): ResponseFor<'TOGGLE_PICKER'> {
@@ -54,7 +65,7 @@ function restoreAfterCapture(): ResponseFor<'RESTORE_AFTER_CAPTURE'> {
   return { ok: true, restoredCount: 0 };
 }
 
-function dispatch(type: ContentMessageType): ExtensionResponse {
+async function dispatch(type: ContentMessageType): Promise<ExtensionResponse> {
   switch (type) {
     case 'SCAN_AND_MASK':
       return scanAndMask();
@@ -71,7 +82,7 @@ function dispatch(type: ContentMessageType): ExtensionResponse {
   }
 }
 
-function handleMessage(message: ExtensionMessage): ExtensionResponse {
+async function handleMessage(message: ExtensionMessage): Promise<ExtensionResponse> {
   if (message.type === 'CAPTURE_SCREENSHOT' || message.type === 'CHECK_PRO') {
     return { ok: false, error: `${message.type} is handled by the service worker.` };
   }
@@ -82,11 +93,10 @@ if (globalWithFlag[INJECTION_FLAG] !== true) {
   globalWithFlag[INJECTION_FLAG] = true;
 
   chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
-    try {
-      sendResponse(handleMessage(message));
-    } catch (error) {
-      sendResponse(toErrorResponse(error));
-    }
-    return false;
+    // Scanning batches across idle callbacks, so the channel must stay open.
+    handleMessage(message)
+      .then(sendResponse)
+      .catch((error: unknown) => sendResponse(toErrorResponse(error)));
+    return true;
   });
 }

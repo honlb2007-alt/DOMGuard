@@ -49,7 +49,9 @@ export type MessageType = ExtensionMessage['type'];
 
 export interface ScanAndMaskResponse {
   ok: true;
-  maskedCount: number;
+  count: number;
+  /** Hits per pattern label; labels are display-ready, counts are totals. */
+  byType: Record<string, number>;
 }
 
 export interface ClearMasksResponse {
