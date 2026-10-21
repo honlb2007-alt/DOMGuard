@@ -9,61 +9,140 @@
   <body>
     <main class="app">
       <header class="header">
-        <div class="title-row">
-          <h1>DOMGuard</h1>
-          <span id="plan-badge" class="badge">…</span>
-        </div>
-        <p id="quota-line" class="quota">Checking plan…</p>
+        <h1>DOMGuard</h1>
+        <span id="plan-badge" class="badge">…</span>
       </header>
 
-      <label class="field">
-        <span>Mask style</span>
-        <select id="mask-style">
-          <option value="black">Solid black</option>
-          <option value="blur">Blur</option>
-        </select>
-      </label>
-
-      <div class="actions">
-        <button id="scan-and-mask" type="button" class="btn">
-          <span class="btn-label">Auto Scan &amp; Mask</span>
-        </button>
-        <button id="clear-masks" type="button" class="btn">Clear Masks</button>
-        <button id="toggle-picker" type="button" class="btn">Manual picker: off</button>
-        <button id="detect-hidden-text" type="button" class="btn">
-          <span class="btn-label">Scan Hidden Text</span>
-        </button>
+      <section class="section" aria-labelledby="protection-title">
+        <h2 id="protection-title" class="section-title">Protection</h2>
         <div class="protect">
-          <label class="protect-toggle" for="protect-mode">
-            <input id="protect-mode" type="checkbox" />
-            <span>Protect Mode</span>
+          <label class="protect-toggle" for="protect-all">
+            <input id="protect-all" type="checkbox" />
+            <span>Protect all sites</span>
           </label>
           <span id="protect-pro-mark" class="pro-marks" hidden></span>
         </div>
         <p class="hint">
-          Hides hidden text on this page while on. Works with any screenshot or screen recording
-          tool.
+          Hides hidden text and masks sensitive data on every site while on. Works with any
+          screenshot or screen recording tool.
         </p>
-        <div class="shot">
-          <div class="shot-actions">
-            <button id="capture-screenshot" type="button" class="btn btn-primary">
-              <span class="btn-label">Safe Screenshot</span>
-            </button>
-            <button id="copy-screenshot" type="button" class="btn">
-              <span class="btn-label">Copy</span>
-            </button>
+        <div id="protect-options" class="protect-options" hidden>
+          <label class="protect-toggle" for="protect-hide-text">
+            <input id="protect-hide-text" type="checkbox" checked />
+            <span>Hide hidden text</span>
+          </label>
+          <label class="protect-toggle" for="protect-mask-data">
+            <input id="protect-mask-data" type="checkbox" checked />
+            <span>Mask sensitive data</span>
+          </label>
+          <div class="protect-types">
+            <label class="protect-toggle" for="mask-api">
+              <input id="mask-api" type="checkbox" checked />
+              <span>API keys and tokens</span>
+            </label>
+            <label class="protect-toggle" for="mask-cards">
+              <input id="mask-cards" type="checkbox" checked />
+              <span>Credit card numbers</span>
+            </label>
+            <label class="protect-toggle" for="mask-emails">
+              <input id="mask-emails" type="checkbox" />
+              <span>Emails</span>
+            </label>
+            <label class="protect-toggle" for="mask-phones">
+              <input id="mask-phones" type="checkbox" />
+              <span>Phone numbers</span>
+            </label>
           </div>
-          <button id="download-capture" type="button" class="btn" hidden>
-            <span class="btn-label">Download</span>
-          </button>
-          <p class="hint">Captures the visible area only.</p>
         </div>
-      </div>
+        <div id="protect-site-controls" hidden>
+          <label class="protect-toggle" for="protect-disable-site">
+            <input id="protect-disable-site" type="checkbox" />
+            <span>Disable on this site</span>
+          </label>
+          <ul id="protect-exceptions" class="protect-exceptions"></ul>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="capture-title">
+        <h2 id="capture-title" class="section-title">Capture</h2>
+        <button id="capture-area" type="button" class="btn">Capture area</button>
+        <div class="custom-size">
+          <span class="custom-label" id="custom-size-label">Custom size</span>
+          <div class="size-inputs">
+            <label class="size-field">
+              <span>Width</span>
+              <input
+                id="custom-width"
+                type="number"
+                min="16"
+                max="8000"
+                step="1"
+                inputmode="numeric"
+                aria-label="Width"
+              />
+            </label>
+            <label class="size-field">
+              <span>Height</span>
+              <input
+                id="custom-height"
+                type="number"
+                min="16"
+                max="8000"
+                step="1"
+                inputmode="numeric"
+                aria-label="Height"
+              />
+            </label>
+          </div>
+          <button id="capture-custom-size" type="button" class="btn">Capture custom size</button>
+        </div>
+        <div class="shot-actions">
+          <button id="capture-screenshot" type="button" class="btn btn-primary">
+            <span class="btn-label">Capture visible area</span>
+          </button>
+          <button id="copy-screenshot" type="button" class="btn">
+            <span class="btn-label">Copy</span>
+          </button>
+        </div>
+        <button id="download-capture" type="button" class="btn" hidden>
+          <span class="btn-label">Download</span>
+        </button>
+        <label class="protect-toggle" for="auto-copy">
+          <input id="auto-copy" type="checkbox" checked />
+          <span>Copy to clipboard automatically</span>
+        </label>
+        <p class="hint">Captures the visible area only.</p>
+        <p id="quota-line" class="quota">Checking plan…</p>
+        <p id="free-cleanup-note" class="note" hidden>Hidden-text cleanup is a Pro feature</p>
+      </section>
+
+      <section class="section" aria-labelledby="tools-title">
+        <h2 id="tools-title" class="section-title">Tools</h2>
+        <button id="toggle-picker" type="button" class="btn">Manual picker: off</button>
+        <button id="detect-hidden-text" type="button" class="btn">
+          <span class="btn-label">Show Hidden Text</span>
+        </button>
+        <p class="hint">
+          Shows where hidden text is on this page and highlights text that looks like an instruction to an AI.
+        </p>
+        <button id="scan-and-mask" type="button" class="btn">
+          <span class="btn-label">Auto Scan &amp; Mask</span>
+        </button>
+        <button id="clear-masks" type="button" class="btn">Clear Masks</button>
+      </section>
+
+      <section class="section" aria-labelledby="settings-title">
+        <h2 id="settings-title" class="section-title">Settings</h2>
+        <label class="field" for="mask-style">
+          <span>Mask style</span>
+          <select id="mask-style">
+            <option value="black">Solid black</option>
+            <option value="blur">Blur</option>
+          </select>
+        </label>
+      </section>
 
       <p id="status" class="status" role="status" aria-live="polite">Ready.</p>
-      <p id="free-cleanup-note" class="note" hidden>Hidden-text cleanup is a Pro feature</p>
-      <!-- Filled only by main.ts, with createElement and textContent. -->
-      <ul id="hidden-text-findings" class="findings"></ul>
 
       <section id="upgrade-panel" class="upgrade" hidden aria-labelledby="upgrade-title">
         <h2 id="upgrade-title">Upgrade to DOMGuard Pro</h2>
@@ -78,6 +157,12 @@
           <button id="upgrade-dismiss" type="button" class="btn">Not now</button>
         </div>
         <p class="fine">Payments are handled securely by ExtensionPay and Stripe.</p>
+      </section>
+
+      <section class="section" aria-labelledby="shortcuts-title">
+        <h2 id="shortcuts-title" class="section-title">Shortcuts</h2>
+        <ul id="shortcut-list" class="shortcut-list"></ul>
+        <button id="change-shortcuts" type="button" class="btn">Change shortcuts</button>
       </section>
 
       <div class="footer">

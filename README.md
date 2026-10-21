@@ -14,7 +14,7 @@ Chrome does not allow extensions to run on `chrome://` pages, the Chrome Web Sto
 
 Screenshots capture only the visible area of the current tab. They do not include the browser UI, other tabs, or other windows.
 
-Protect Mode only handles hidden text on the page. It does not process a screen recording or a screenshot after the fact.
+Protect all sites only handles hidden text on the page. It does not process a screen recording or a screenshot after the fact. It runs in the top frame only and does not scan iframes, so hidden text inside a frame stays as the page drew it.
 
 Detection is best-effort. It cannot guarantee that every secret or every hidden instruction is found.
 
@@ -43,7 +43,13 @@ When ExtensionPay checks the install, it saves the user record in `chrome.storag
 
 On Pro, hidden text found in the page is set to `visibility: hidden` and the capture waits two animation frames so the page can repaint. Masks stay in the image. The page is restored afterwards, including when the capture fails. A pixel pass then rewrites pixels that sit strictly closer than `DEFAULT_THRESHOLD` (default `12`) to a block background. Tune `DEFAULT_THRESHOLD` and `DEFAULT_BLOCK_SIZE` in `src/background/pixel-clean.ts`. Raising the threshold removes more faint noise and can also soften real edges. Lowering it leaves more near-background text in place.
 
-An unpaid install gets `FREE_DAILY_SCREENSHOTS` plain screenshots per local day (3). Those captures do not remove hidden text and do not run the pixel pass. The count lives in `chrome.storage.local` on this machine, so it is not a security boundary.
+An unpaid install gets `FREE_DAILY_SCREENSHOTS` plain screenshots per local day (3). Those captures do not remove hidden text and do not run the pixel pass. The count lives in `chrome.storage.local` on this machine, so it is not a security boundary. The allowance is counted only after a capture succeeds.
+
+**Capture area** is Ctrl+Shift+S (Command+Shift+S on Mac). Drag a rectangle, or press the shortcut again to capture the visible area. Change the shortcut at `chrome://extensions/shortcuts`.
+
+## Development rules
+
+The constraints for UI text, permissions, Pro checks, storage, and reviews are in [docs/DEV_RULES.md](docs/DEV_RULES.md).
 
 ## Development
 
@@ -52,10 +58,12 @@ npm install
 npm run dev
 ```
 
-Load `dist` as an unpacked extension (`chrome://extensions`, Developer mode, **Load unpacked**). `npm run dev` covers the popup and service worker. The on-demand content script is a separate bundle:
+Load `dist` as an unpacked extension (`chrome://extensions`, Developer mode, **Load unpacked**). `npm run dev` covers the popup and service worker. The on-demand content script and the Protect all sites script are a separate bundle. `protect-all.js` keeps that exact file name, with no content hash, so the service worker can register it:
 
 ```bash
 npx vite build --config vite.content.config.ts --watch
+npx vite build --config vite.protect.config.ts --watch
+npx vite build --config vite.automask.config.ts --watch
 ```
 
 ```bash

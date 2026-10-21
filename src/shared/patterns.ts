@@ -50,6 +50,62 @@ function digitsOf(value: string): string {
   return value.replace(/[^0-9]/g, '');
 }
 
+export const API_KEY_PATTERN_IDS = [
+  'jwt',
+  'anthropic_key',
+  'openai_key',
+  'aws_access_key',
+  'github_token',
+  'stripe_key',
+] as const;
+
+export const CARD_PATTERN_IDS = ['credit_card'] as const;
+
+export const EMAIL_PATTERN_IDS = ['email'] as const;
+
+export const PHONE_PATTERN_IDS = ['tw_mobile', 'intl_phone'] as const;
+
+/** Which sensitive-data groups Protect all sites is allowed to mask. */
+export interface MaskTypeSelection {
+  apiKeys: boolean;
+  cards: boolean;
+  emails: boolean;
+  phones: boolean;
+}
+
+/** Emails and phone numbers stay off so ordinary pages remain usable. */
+export const DEFAULT_MASK_TYPES: MaskTypeSelection = {
+  apiKeys: true,
+  cards: true,
+  emails: false,
+  phones: false,
+};
+
+export function enabledPatternIds(selection: MaskTypeSelection): Set<string> {
+  const ids = new Set<string>();
+  if (selection.apiKeys) {
+    for (const id of API_KEY_PATTERN_IDS) {
+      ids.add(id);
+    }
+  }
+  if (selection.cards) {
+    for (const id of CARD_PATTERN_IDS) {
+      ids.add(id);
+    }
+  }
+  if (selection.emails) {
+    for (const id of EMAIL_PATTERN_IDS) {
+      ids.add(id);
+    }
+  }
+  if (selection.phones) {
+    for (const id of PHONE_PATTERN_IDS) {
+      ids.add(id);
+    }
+  }
+  return ids;
+}
+
 export const PATTERNS: readonly PatternDef[] = [
   {
     id: 'email',
@@ -131,13 +187,16 @@ interface RankedMatch extends SensitiveMatch {
  * offset the longer match wins, and any match fully covered by an earlier one
  * is dropped. Results are sorted by start offset.
  */
-export function findSensitive(text: string): SensitiveMatch[] {
-  if (text.length === 0) {
+export function findSensitive(text: string, enabledIds?: ReadonlySet<string>): SensitiveMatch[] {
+  if (text.length === 0 || (enabledIds !== undefined && enabledIds.size === 0)) {
     return [];
   }
 
   const found: RankedMatch[] = [];
   PATTERNS.forEach((pattern, rank) => {
+    if (enabledIds !== undefined && !enabledIds.has(pattern.id)) {
+      return;
+    }
     const { regex } = pattern;
     // Shared RegExp objects keep state between calls; findSensitive is never
     // re-entered, and running each loop to completion leaves lastIndex at 0.

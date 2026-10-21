@@ -87,6 +87,7 @@ let host: HTMLElement | null = null;
 let shadow: ShadowRoot | null = null;
 let layer: HTMLDivElement | null = null;
 let highlight: HTMLDivElement | null = null;
+let reviewRoot: HTMLDivElement | null = null;
 
 const entries = new Map<number, MaskEntry>();
 let nextHandleId = 1;
@@ -125,6 +126,37 @@ function ensureHost(): void {
   layer.className = 'layer';
   shadow.append(style, layer);
   document.documentElement.append(host);
+}
+
+/** The closed overlay host. Masks stay pointer-events none; the review panel opts in. */
+export function ensureReviewRoot(): HTMLDivElement {
+  ensureHost();
+  if (!shadow) {
+    throw new Error('Overlay host is missing.');
+  }
+  if (reviewRoot?.isConnected) {
+    return reviewRoot;
+  }
+  reviewRoot = document.createElement('div');
+  reviewRoot.className = 'review';
+  shadow.append(reviewRoot);
+  return reviewRoot;
+}
+
+export function removeReviewRoot(): void {
+  reviewRoot?.remove();
+  reviewRoot = null;
+  if (entries.size > 0 || highlight || autoMaskEnabled) {
+    return;
+  }
+  if (frame) {
+    cancelAnimationFrame(frame);
+    frame = 0;
+  }
+  host?.remove();
+  host = null;
+  shadow = null;
+  layer = null;
 }
 
 function scheduleUpdate(): void {
@@ -362,6 +394,53 @@ function dropEntry(entry: MaskEntry): void {
   entries.delete(entry.handle.id);
 }
 
+let peeled = false;
+
+/** Hide every DOMGuard overlay while Alt is held. The page itself is not edited. */
+export function setMasksPeeled(next: boolean): void {
+  peeled = next;
+  for (const element of document.querySelectorAll(`[${GUARD_ATTRIBUTE}]`)) {
+    if (element instanceof HTMLElement) {
+      element.style.setProperty('visibility', next ? 'hidden' : 'visible', 'important');
+    }
+  }
+}
+
+function applyPeeled(): void {
+  if (peeled) {
+    setMasksPeeled(true);
+  }
+}
+
+/** Add scan masks without dropping ones already drawn. */
+export function appendScanMasks(matches: PageMatch[], style: MaskStyle): void {
+  currentStyle = style;
+  ensureHost();
+  startListening();
+  for (const match of matches) {
+    addEntry(match.target, style, 'scan');
+  }
+  draw();
+  applyPeeled();
+}
+
+/** Drop scan masks whose target sits inside root, then let the caller rescan it. */
+export function removeScanMasksUnder(root: Node): void {
+  for (const entry of [...entries.values()]) {
+    if (entry.origin !== 'scan') {
+      continue;
+    }
+    const node = entry.target.kind === 'element' ? entry.target.element : entry.target.range.startContainer;
+    const inside =
+      node === root ||
+      (root instanceof Element && root.contains(node)) ||
+      (root instanceof Text && node === root);
+    if (inside) {
+      dropEntry(entry);
+    }
+  }
+}
+
 /** Draw masks for a scan result, replacing any masks from a previous scan. */
 export function applyMasks(matches: PageMatch[], style: MaskStyle): void {
   currentStyle = style;
@@ -450,8 +529,19 @@ export function setRescanRequestHandler(handler: (() => void) | null): void {
   rescanHandler = handler;
 }
 
+/** Remove scan masks and leave manual picker masks in place. */
+export function clearScanMasks(): void {
+  for (const entry of [...entries.values()]) {
+    if (entry.origin === 'scan') {
+      dropEntry(entry);
+    }
+  }
+  draw();
+}
+
 /** Remove every mask and all traces of the overlay from the page. */
 export function clearMasks(): void {
+  peeled = false;
   for (const entry of [...entries.values()]) {
     dropEntry(entry);
   }
@@ -469,5 +559,6 @@ export function clearMasks(): void {
   shadow = null;
   layer = null;
   highlight = null;
+  reviewRoot = null;
   autoMaskEnabled = false;
 }

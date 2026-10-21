@@ -5,6 +5,7 @@
   "description": "Hides API keys, emails, and other secrets in screenshots, and detects hidden text that can hijack AI.",
   "permissions": ["activeTab", "storage", "scripting"],
   "host_permissions": ["https://extensionpay.com/*"],
+  "optional_host_permissions": ["<all_urls>"],
   "content_scripts": [
     {
       "matches": ["https://extensionpay.com/*"],
@@ -12,6 +13,27 @@
       "run_at": "document_start"
     }
   ],
+  "commands": {
+    "toggle-protect": {
+      "suggested_key": {
+        "default": "Alt+Shift+P"
+      },
+      "description": "Turn Protect all sites on or off"
+    },
+    "quick-mask": {
+      "suggested_key": {
+        "default": "Alt+Shift+M"
+      },
+      "description": "Mask sensitive data on this page"
+    },
+    "capture-area": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+S",
+        "mac": "Command+Shift+S"
+      },
+      "description": "Capture an area of the page"
+    }
+  },
   "action": {
     "default_popup": "src/popup/index.html",
     "default_icon": {

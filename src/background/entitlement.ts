@@ -58,34 +58,41 @@ function freshProCache(now: number): boolean | null {
   return proCache.paid;
 }
 
+export type ProAccess = 'paid' | 'unpaid' | 'unavailable';
+
 /**
  * Paid status from ExtensionPay. A fresh in-memory result is reused for 10
- * minutes. If getUser() fails, the answer is unpaid. Nothing in storage is
- * consulted.
+ * minutes. A network failure is `unavailable` and is not cached, so an offline
+ * check can be retried. Nothing in storage is consulted.
  */
-export async function isPro(): Promise<boolean> {
+export async function proAccess(): Promise<ProAccess> {
   // Removed entirely from production builds. Reads a local boolean so the Pro
   // path can be exercised without a payment.
   if (import.meta.env.DEV) {
     const stored = await chrome.storage.local.get('devForcePro');
     if (stored.devForcePro === true) {
-      return true;
+      return 'paid';
     }
   }
 
   const cached = freshProCache(Date.now());
   if (cached !== null) {
-    return cached;
+    return cached ? 'paid' : 'unpaid';
   }
 
   try {
     const user = await extpay.getUser();
     const paid = user.paid === true;
     proCache = { paid, checkedAt: Date.now() };
-    return paid;
+    return paid ? 'paid' : 'unpaid';
   } catch {
-    return false;
+    return 'unavailable';
   }
+}
+
+/** True only when ExtensionPay (or the dev switch) says this install is paid. */
+export async function isPro(): Promise<boolean> {
+  return (await proAccess()) === 'paid';
 }
 
 /** Drop the in-memory paid flag so the next check asks ExtensionPay. */
@@ -138,6 +145,28 @@ export function consumeScreenshotQuota(now: Date = new Date()): Promise<boolean>
     }
     await writeQuota({ date: record.date, count: record.count + 1 });
     return true;
+  });
+}
+
+/**
+ * Count one free screenshot only after `produce` resolves.
+ * Returns null when today's allowance is already used. A thrown produce
+ * does not change the count. A non-finite allowance is not counted.
+ */
+export function takeFreeScreenshot<T>(
+  produce: () => Promise<T>,
+  now: Date = new Date(),
+): Promise<T | null> {
+  return withQuotaLock(async () => {
+    const record = await readQuota(now);
+    if (Number.isFinite(FREE_DAILY_SCREENSHOTS) && record.count >= FREE_DAILY_SCREENSHOTS) {
+      return null;
+    }
+    const value = await produce();
+    if (Number.isFinite(FREE_DAILY_SCREENSHOTS)) {
+      await writeQuota({ date: record.date, count: record.count + 1 });
+    }
+    return value;
   });
 }
 

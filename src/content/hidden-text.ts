@@ -8,9 +8,18 @@
 // TODO: an AI agent reading the DOM directly still sees display:none text, so
 // this could become an opt-in "strict" mode later.
 
-import { blend, contrastRatio, parseColor, type Rgba } from './contrast';
-import { GUARD_SELECTOR } from './scanner';
+import { parseColor, type Rgba } from './contrast';
+import {
+  contrastOn,
+  judgeBackground,
+  shouldProtectHide,
+  type BackgroundJudgement,
+  type BackgroundLayer,
+} from './protect-decision';
 import type { HiddenReason } from '../shared/messages';
+
+/** Same marker the masker sets. Duplicated so this file does not pull in the scanner. */
+const GUARD_SELECTOR = '[data-domguard]';
 
 export type { HiddenReason };
 
@@ -19,6 +28,11 @@ export interface HiddenFinding {
   preview: string;
   reason: HiddenReason;
   contrastRatio?: number;
+  textLength: number;
+  backgroundSource: string;
+  textColor: string;
+  backgroundColor: string;
+  classPath: string;
 }
 
 /** Below this ratio, text is effectively invisible against its background. */
@@ -35,10 +49,11 @@ const PREVIEW_LENGTH = 80;
 
 const SKIPPED_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE']);
 
-const WHITE: Rgba = { r: 255, g: 255, b: 255, a: 1 };
-
 /** Inline visibility values replaced by sanitizeBeforeCapture. */
 const sanitized = new Map<HTMLElement | SVGElement, { value: string; priority: string }>();
+
+/** Character counts only. The text itself is not kept. */
+const hiddenLengths = new Map<HTMLElement | SVGElement, number>();
 
 /** The element's own text, ignoring text inside child elements. */
 function ownText(element: Element): string {
@@ -75,35 +90,40 @@ function effectiveOpacity(element: Element, styles: Map<Element, CSSStyleDeclara
   return opacity;
 }
 
+function styleOf(element: Element, styles: Map<Element, CSSStyleDeclaration>): CSSStyleDeclaration {
+  const known = styles.get(element);
+  if (known) {
+    return known;
+  }
+  const style = getComputedStyle(element);
+  styles.set(element, style);
+  return style;
+}
+
 /**
- * The colour actually painted behind the text: the first ancestor background
- * with any alpha, falling back to white.
- *
- * Returns null when an element in that chain paints a background image or
- * gradient. The painted colour under the text is then unknowable without
- * rasterising, and guessing would produce false positives on perfectly
- * readable text, so the contrast check is skipped for that element. The pixel
- * pass in task B is the right place to catch those.
+ * Background behind the text. An image, gradient, backdrop filter, or a
+ * translucent colour with no opaque base is not a usable colour. There is no
+ * white fallback.
  */
-function effectiveBackground(
+function judgeElementBackground(
   element: Element,
   styles: Map<Element, CSSStyleDeclaration>,
-): Rgba | null {
+): BackgroundJudgement {
+  const layers: BackgroundLayer[] = [];
   for (let current: Element | null = element; current; current = current.parentElement) {
-    const style = styles.get(current) ?? getComputedStyle(current);
-    styles.set(current, style);
-    if (style.backgroundImage !== 'none') {
-      return null;
-    }
-    const background = parseColor(style.backgroundColor);
-    if (background && background.a > 0) {
-      return background.a >= 1 ? background : blend(background, WHITE);
-    }
+    const style = styleOf(current, styles);
+    layers.push({
+      backgroundColor: style.backgroundColor,
+      backgroundImage: style.backgroundImage,
+      backdropFilter: style.getPropertyValue('backdrop-filter') || 'none',
+      onCanvas: current === document.body || current === document.documentElement,
+    });
     if (current === document.documentElement) {
       break;
     }
   }
-  return WHITE;
+  const scheme = styleOf(document.documentElement, styles).getPropertyValue('color-scheme');
+  return judgeBackground(layers, scheme);
 }
 
 function isFullyClipped(style: CSSStyleDeclaration): boolean {
@@ -191,9 +211,60 @@ function collectCandidates(): Candidate[] {
  * Classify one candidate. Reasons are checked in priority order and only the
  * first match is reported, so an element is never listed twice.
  */
+const INTERACTIVE_SELECTOR =
+  'button, a, input, select, textarea, label, summary, nav, menu, dialog, [role="menu"], [role="dialog"], [role="tooltip"], [role="navigation"], [contenteditable]';
+
+function isInteractive(element: Element): boolean {
+  if (element.closest(INTERACTIVE_SELECTOR)) {
+    return true;
+  }
+  if (element.hasAttribute('role') || element.hasAttribute('tabindex')) {
+    return true;
+  }
+  for (const attribute of element.getAttributeNames()) {
+    if (attribute.startsWith('aria-')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function classPath(element: Element): string {
+  const parts: string[] = [];
+  let current: Element | null = element;
+  let depth = 0;
+  while (current && depth < 6) {
+    const names = [...current.classList].slice(0, 3);
+    const tag = current.tagName.toLowerCase();
+    parts.push(names.length > 0 ? `${tag}.${names.join('.')}` : tag);
+    current = current.parentElement;
+    depth += 1;
+  }
+  return parts.join(' > ');
+}
+
+/** Visibility before this extension hid the element, so a recheck can restore it. */
+function visibilityOf(element: Element, style: CSSStyleDeclaration): string {
+  if (element instanceof HTMLElement || element instanceof SVGElement) {
+    const saved = sanitized.get(element);
+    if (saved) {
+      return saved.value || 'visible';
+    }
+  }
+  return style.visibility;
+}
+
+function colourText(color: Rgba | null): string {
+  if (!color) {
+    return 'unknown';
+  }
+  return `rgba(${Math.round(color.r)}, ${Math.round(color.g)}, ${Math.round(color.b)}, ${color.a.toFixed(2)})`;
+}
+
 function classify(
   candidate: Candidate,
   styles: Map<Element, CSSStyleDeclaration>,
+  minLength?: number,
 ): HiddenFinding | null {
   const { element, text, style, rect } = candidate;
   if (style.display === 'none') {
@@ -202,57 +273,146 @@ function classify(
   const preview = toPreview(text);
   const textColor = parseColor(style.color);
   const opacity = effectiveOpacity(element, styles);
+  const background = judgeElementBackground(element, styles);
+  let reason: HiddenReason | null = null;
+  let contrast: number | undefined;
 
-  const background = effectiveBackground(element, styles);
-  if (textColor && background) {
-    // Fold opacity into the text alpha so 1% opacity reads as unreadable.
-    const faded: Rgba = { ...textColor, a: textColor.a * opacity };
-    const ratio = contrastRatio(blend(faded, background), background);
+  if (textColor && background.reliable && background.color) {
+    const ratio = contrastOn(textColor, background.color, opacity);
     if (ratio < LOW_CONTRAST_RATIO) {
-      return { element, preview, reason: 'low_contrast', contrastRatio: ratio };
+      reason = 'low_contrast';
+      contrast = ratio;
     }
   }
 
   const fontSize = Number.parseFloat(style.fontSize);
-  if (Number.isFinite(fontSize) && fontSize < TINY_FONT_PX) {
-    return { element, preview, reason: 'tiny_font' };
+  if (reason === null && Number.isFinite(fontSize) && fontSize < TINY_FONT_PX) {
+    reason = 'tiny_font';
   }
 
-  if (opacity < MIN_OPACITY || (textColor && textColor.a < MIN_OPACITY)) {
-    return { element, preview, reason: 'transparent' };
+  if (reason === null && (opacity < MIN_OPACITY || (textColor !== null && textColor.a < MIN_OPACITY))) {
+    reason = 'transparent';
   }
 
-  if (style.visibility === 'hidden' || style.visibility === 'collapse') {
-    return { element, preview, reason: 'hidden_visibility' };
+  const visibility = visibilityOf(element, style);
+  if (reason === null && (visibility === 'hidden' || visibility === 'collapse')) {
+    reason = 'hidden_visibility';
   }
 
   const clipsOverflow = style.overflowX !== 'visible' || style.overflowY !== 'visible';
-  if ((rect.width === 0 || rect.height === 0) && clipsOverflow) {
-    return { element, preview, reason: 'zero_size' };
+  if (reason === null && (rect.width === 0 || rect.height === 0) && clipsOverflow) {
+    reason = 'zero_size';
   }
 
-  if (isOffscreen(element, style, rect)) {
-    return { element, preview, reason: 'offscreen' };
+  if (reason === null && isOffscreen(element, style, rect)) {
+    reason = 'offscreen';
   }
 
-  if (isFullyClipped(style)) {
-    return { element, preview, reason: 'clipped' };
+  if (reason === null && isFullyClipped(style)) {
+    reason = 'clipped';
   }
 
-  return null;
+  if (
+    !shouldProtectHide({
+      text,
+      reason,
+      interactive: isInteractive(element),
+      backgroundReliable: background.reliable,
+      minLength,
+    })
+  ) {
+    return null;
+  }
+  if (reason === null) {
+    return null;
+  }
+
+  return {
+    element,
+    preview,
+    reason,
+    contrastRatio: contrast,
+    textLength: text.length,
+    backgroundSource: background.source,
+    textColor: colourText(textColor),
+    backgroundColor: colourText(background.color),
+    classPath: classPath(element),
+  };
 }
 
-/** Find text that is present and painted but unreadable to a person. */
-export function detectHiddenText(): HiddenFinding[] {
-  const styles = new Map<Element, CSSStyleDeclaration>();
+export interface HiddenTextOptions {
+  /** Passed through to shouldProtectHide. Scan and screenshots keep the default. */
+  minLength?: number;
+}
+
+/** Text-owning elements under root, skipping iframes. Stops at `limit`. */
+export function collectTextElements(root: Node, limit: number): Element[] {
+  const found: Element[] = [];
+  const stack: Element[] = [];
+  if (root instanceof Element) {
+    if (root.tagName !== 'IFRAME') {
+      stack.push(root);
+    }
+  } else if (root instanceof Document && root.body) {
+    stack.push(root.body);
+  }
+  while (stack.length > 0 && found.length < limit) {
+    const element = stack.pop();
+    if (!element || element.tagName === 'IFRAME') {
+      continue;
+    }
+    if (!SKIPPED_TAGS.has(element.tagName) && !element.closest(GUARD_SELECTOR) && ownText(element).length > 0) {
+      found.push(element);
+    }
+    for (let index = element.children.length - 1; index >= 0; index -= 1) {
+      const child = element.children[index];
+      if (child.tagName !== 'IFRAME') {
+        stack.push(child);
+      }
+    }
+  }
+  return found;
+}
+
+/** Classify an already collected list. Reads layout once for the whole list. */
+export function classifyElements(
+  elements: readonly Element[],
+  options?: HiddenTextOptions,
+): HiddenFinding[] {
+  const usable = elements.filter(
+    (element) =>
+      element.isConnected &&
+      element.tagName !== 'IFRAME' &&
+      !SKIPPED_TAGS.has(element.tagName) &&
+      !element.closest(GUARD_SELECTOR),
+  );
+  const texts = usable.map((element) => ownText(element));
+  const styled = usable.filter((_, index) => texts[index].length > 0);
+  const styledTexts = texts.filter((text) => text.length > 0);
+  const styles = styled.map((element) => getComputedStyle(element));
+  const rects = styled.map((element) => element.getBoundingClientRect());
+  const cache = new Map<Element, CSSStyleDeclaration>();
   const findings: HiddenFinding[] = [];
-  for (const candidate of collectCandidates()) {
-    const finding = classify(candidate, styles);
+  for (let index = 0; index < styled.length; index += 1) {
+    cache.set(styled[index], styles[index]);
+    const finding = classify(
+      { element: styled[index], text: styledTexts[index], style: styles[index], rect: rects[index] },
+      cache,
+      options?.minLength,
+    );
     if (finding) {
       findings.push(finding);
     }
   }
   return findings;
+}
+
+/** Find text that is present and painted but unreadable to a person. */
+export function detectHiddenText(options?: HiddenTextOptions): HiddenFinding[] {
+  if (!document.body) {
+    return [];
+  }
+  return classifyElements(collectTextElements(document.body, Number.POSITIVE_INFINITY), options);
 }
 
 /**
@@ -263,23 +423,94 @@ export function detectHiddenText(): HiddenFinding[] {
  * documentElement, and candidates inside `[data-domguard]` are skipped, so the
  * masks stay in the screenshot.
  */
+function canHide(element: Element): element is HTMLElement | SVGElement {
+  return element instanceof HTMLElement || element instanceof SVGElement;
+}
+
+function rememberHide(element: HTMLElement | SVGElement, finding: HiddenFinding): void {
+  if (sanitized.has(element)) {
+    return;
+  }
+  sanitized.set(element, {
+    value: element.style.getPropertyValue('visibility'),
+    priority: element.style.getPropertyPriority('visibility'),
+  });
+  hiddenLengths.set(element, finding.textLength);
+  element.style.setProperty('visibility', 'hidden', 'important');
+  // Development builds only. The record has colours and a class path, never text.
+  if (import.meta.env.DEV) {
+    console.debug('domguard-protect-hide', {
+      reason: finding.reason,
+      contrastRatio: finding.contrastRatio ?? null,
+      textColor: finding.textColor,
+      backgroundColor: finding.backgroundColor,
+      backgroundSource: finding.backgroundSource,
+      tag: element.tagName.toLowerCase(),
+      classPath: finding.classPath,
+    });
+  }
+}
+
+function releaseElement(element: HTMLElement | SVGElement): void {
+  const previous = sanitized.get(element);
+  if (!previous) {
+    return;
+  }
+  element.style.removeProperty('visibility');
+  if (previous.value) {
+    element.style.setProperty('visibility', previous.value, previous.priority);
+  }
+  if (element.getAttribute('style') === '') {
+    element.removeAttribute('style');
+  }
+  sanitized.delete(element);
+  hiddenLengths.delete(element);
+}
+
+export function isProtectHeld(element: Element): boolean {
+  return canHide(element) && sanitized.has(element);
+}
+
+/** Hide one element Protect Mode has already confirmed. Returns false if it was already held. */
+export function hideProtectFinding(finding: HiddenFinding): boolean {
+  if (!canHide(finding.element) || sanitized.has(finding.element)) {
+    return false;
+  }
+  rememberHide(finding.element, finding);
+  return true;
+}
+
+/** Restore one element that no longer qualifies. */
+export function releaseProtectElement(element: Element): boolean {
+  if (!canHide(element) || !sanitized.has(element)) {
+    return false;
+  }
+  releaseElement(element);
+  return true;
+}
+
+/** Elements this extension currently hides. Used to restore ones that no longer qualify. */
+export function hiddenProtectElements(): Element[] {
+  return [...sanitized.keys()];
+}
+
+/** How much is currently hidden. Lengths are counts, not copies of the text. */
+export function protectHideStats(): { count: number; chars: number } {
+  let chars = 0;
+  for (const length of hiddenLengths.values()) {
+    chars += length;
+  }
+  return { count: sanitized.size, chars };
+}
+
 export function sanitizeBeforeCapture(): number {
   // Later calls only add elements that are not already held. The saved inline
   // value stays the one from before the first hide, so restore can put it back
   // exactly. Undoing the hide here would paint the text for a frame.
   for (const finding of detectHiddenText()) {
-    const { element } = finding;
-    if (!(element instanceof HTMLElement) && !(element instanceof SVGElement)) {
-      continue;
+    if (canHide(finding.element)) {
+      rememberHide(finding.element, finding);
     }
-    if (sanitized.has(element)) {
-      continue;
-    }
-    sanitized.set(element, {
-      value: element.style.getPropertyValue('visibility'),
-      priority: element.style.getPropertyPriority('visibility'),
-    });
-    element.style.setProperty('visibility', 'hidden', 'important');
   }
   return sanitized.size;
 }
@@ -302,4 +533,5 @@ export function restoreAfterCapture(): void {
     }
   }
   sanitized.clear();
+  hiddenLengths.clear();
 }

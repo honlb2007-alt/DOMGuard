@@ -1,0 +1,18 @@
+---
+description: DOMGuard project constraints for UI, permissions, Pro checks, and storage
+alwaysApply: true
+---
+
+# DOMGuard development rules
+
+- Write all interface text and code comments in English.
+- Do not use `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `eval`, `new Function`, or `document.write`. Set dynamic text with `textContent` and `createElement`.
+- Do not `console.log` or `console.error` page content, match results, screenshots, payment data, or user information.
+- Do not make any network request except through the `extpay` library to extensionpay.com. Do not use remote code, a CDN, or analytics.
+- Manifest permissions may only be `activeTab`, `storage`, and `scripting`. The only `host_permissions` entry is `https://extensionpay.com/*`, plus `optional_host_permissions` the maintainer explicitly requested. Before adding any other permission, state the Chrome warning and the effect, and wait for confirmation.
+- Every Pro feature must be checked with `isPro()` in the service worker. Do not trust any field from the popup or a content script. Every `onMessage` listener must check `sender.id` and validate the message with `parseExtensionMessage`.
+- Store only booleans, counts, hostnames, and settings. Never store page content, matched text, or screenshots.
+- Put page overlays in a Shadow DOM with `mode: 'closed'` and `pointer-events: none`. Respond only to events where `event.isTrusted` is true.
+- Pure logic needs a vitest test. Work is not finished until `npm test` and `npm run build` both pass.
+- Production builds must not contain development-only code (`devForcePro`, diagnostic logs). After a production build, confirm that with a search.
+- Do not expand a change beyond what was asked. Do not change files that were not requested. Do not commit to git unless asked.

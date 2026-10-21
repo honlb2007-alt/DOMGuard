@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en" style="color-scheme: dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DOMGuard dark app demo</title>
+    <style>
+      body {
+        margin: 0;
+        background: #111b21;
+        color: #e9edef;
+        font-family: system-ui, sans-serif;
+      }
+
+      .row {
+        padding: 0.75rem 1rem;
+        background: transparent;
+        transition: background-color 180ms linear;
+      }
+
+      .row:hover {
+        background: rgba(255, 255, 255, 0.08);
+      }
+
+      .bubble {
+        margin: 1rem;
+        padding: 0.75rem;
+        color: #e9edef;
+        background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="%2300565a"/></svg>');
+      }
+
+      .reveal {
+        margin: 1rem;
+        opacity: 0;
+        transition: opacity 200ms linear;
+      }
+
+      .reveal:hover {
+        opacity: 1;
+      }
+
+      .case-1 {
+        color: #fffffe;
+        background: #ffffff;
+      }
+
+      .case-2 {
+        color: #f2f2f2;
+        background: #ffffff;
+      }
+
+      .case-3 {
+        font-size: 1px;
+      }
+
+      .case-4 {
+        position: absolute;
+        left: -9999px;
+      }
+
+      .case-5 {
+        opacity: 0.02;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Dark app demo</h1>
+    <p>Light text on a dark background. Hovering a row must not hide it.</p>
+    <div class="row">Alex Rivera — See you at the station after work</div>
+    <div class="row">Mina Chen — The notes from this morning are in the folder</div>
+    <div class="bubble">This message sits on a background image and stays readable.</div>
+    <div class="reveal">Hover to show this line. It fades in and must come back if it was hidden.</div>
+
+    <h2>Hidden cases</h2>
+    <p class="case-1">TEST ONLY - case 1 hidden instruction demo</p>
+    <p class="case-2">TEST ONLY - case 2 hidden instruction demo</p>
+    <p class="case-3">TEST ONLY - case 3 hidden instruction demo</p>
+    <p class="case-4">TEST ONLY - case 4 hidden instruction demo</p>
+    <p class="case-5">TEST ONLY - case 5 hidden instruction demo</p>
+  </body>
+</html>
