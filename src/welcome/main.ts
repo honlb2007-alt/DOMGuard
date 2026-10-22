@@ -6,6 +6,19 @@ import {
   shortcutPlatform,
   type ShortcutCommand,
 } from '../shared/shortcuts';
+import { enabledPatternIds } from '../shared/patterns';
+import { applyMasks, updateMaskStyle } from '../content/masker';
+import { togglePicker } from '../content/picker';
+import {
+  MASK_API_KEYS_KEY,
+  MASK_CARDS_KEY,
+  MASK_EMAILS_KEY,
+  MASK_PHONES_KEY,
+  MASK_STYLE_KEY,
+  maskSelectionFrom,
+} from '../content/protect-decision';
+import { scanPage } from '../content/scanner';
+import { welcomeTryAction } from './try-plan';
 
 const statusEl = document.getElementById('try-status');
 
@@ -63,7 +76,44 @@ document.getElementById('change-shortcuts')?.addEventListener('click', (event) =
   void chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
 });
 
-async function runTry(button: HTMLButtonElement, busyLabel: string, message: { type: 'SCAN_AND_MASK'; style: 'black' } | { type: 'TOGGLE_PICKER' }): Promise<void> {
+async function confirmPro(): Promise<boolean | null> {
+  try {
+    const response: unknown = await chrome.runtime.sendMessage({ type: 'CHECK_PRO' });
+    if (
+      !response ||
+      typeof response !== 'object' ||
+      !('ok' in response) ||
+      (response as { ok?: unknown }).ok !== true ||
+      typeof (response as { isPro?: unknown }).isPro !== 'boolean'
+    ) {
+      return null;
+    }
+    return (response as unknown as { isPro: boolean }).isPro;
+  } catch {
+    return null;
+  }
+}
+
+async function storedMaskChoice(): Promise<{ style: 'black' | 'blur'; ids: ReadonlySet<string> }> {
+  let stored: Record<string, unknown> = {};
+  try {
+    stored = await chrome.storage.local.get([
+      MASK_API_KEYS_KEY,
+      MASK_CARDS_KEY,
+      MASK_EMAILS_KEY,
+      MASK_PHONES_KEY,
+      MASK_STYLE_KEY,
+    ]);
+  } catch {
+    stored = {};
+  }
+  return {
+    style: stored[MASK_STYLE_KEY] === 'blur' ? 'blur' : 'black',
+    ids: enabledPatternIds(maskSelectionFrom(stored)),
+  };
+}
+
+async function runTry(button: HTMLButtonElement, busyLabel: string, kind: 'scan' | 'picker'): Promise<void> {
   const label = labelOf(button);
   const resting = label.textContent ?? '';
   button.disabled = true;
@@ -71,22 +121,21 @@ async function runTry(button: HTMLButtonElement, busyLabel: string, message: { t
   label.textContent = busyLabel;
   setStatus(busyLabel);
   try {
-    const response = (await chrome.runtime.sendMessage(message)) as {
-      ok?: boolean;
-      error?: string;
-      count?: number;
-      active?: boolean;
-    };
-    if (response?.error === 'PRO_REQUIRED') {
+    const action = welcomeTryAction(kind, kind === 'scan' ? await confirmPro() : true);
+    if (action === 'upgrade') {
       setStatus('Auto Scan is part of Pro. Open DOMGuard and choose Upgrade.');
       return;
     }
-    if (!response?.ok) {
+    if (action === 'unavailable') {
       setStatus("Couldn't do that on this page. Open a normal website, then try again from DOMGuard.");
       return;
     }
-    if (message.type === 'SCAN_AND_MASK') {
-      const count = typeof response.count === 'number' ? response.count : 0;
+    const choice = await storedMaskChoice();
+    updateMaskStyle(choice.style);
+    if (kind === 'scan') {
+      const matches = await scanPage(choice.ids);
+      applyMasks(matches, choice.style);
+      const count = matches.length;
       setStatus(
         count === 0
           ? 'No keys or card numbers were found. The samples above are what a scan looks for.'
@@ -94,8 +143,9 @@ async function runTry(button: HTMLButtonElement, busyLabel: string, message: { t
       );
       return;
     }
+    const active = togglePicker();
     setStatus(
-      response.active
+      active
         ? 'Manual picker is on. Click a sample line to cover it.'
         : 'Manual picker is off.',
     );
@@ -114,7 +164,7 @@ document.getElementById('try-scan')?.addEventListener('click', (event) => {
   }
   const button = event.currentTarget;
   if (button instanceof HTMLButtonElement) {
-    void runTry(button, 'Scanning…', { type: 'SCAN_AND_MASK', style: 'black' });
+    void runTry(button, 'Scanning…', 'scan');
   }
 });
 
@@ -124,7 +174,7 @@ document.getElementById('try-picker')?.addEventListener('click', (event) => {
   }
   const button = event.currentTarget;
   if (button instanceof HTMLButtonElement) {
-    void runTry(button, 'Turning on picker…', { type: 'TOGGLE_PICKER' });
+    void runTry(button, 'Turning on picker…', 'picker');
   }
 });
 

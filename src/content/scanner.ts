@@ -2,7 +2,7 @@
 // nodes and form fields, and report where the hits are. Only offsets and
 // geometry leave this module — never the matched text itself.
 
-import { findSensitive } from '../shared/patterns';
+import { DEFAULT_MASK_TYPES, enabledPatternIds as idsForSelection, findSensitive } from '../shared/patterns';
 
 /**
  * A live reference the masker can re-measure after the page changes. Text hits
@@ -254,11 +254,16 @@ async function processInBatches<T>(
   }
 }
 
-/** Scan the current page and report every sensitive hit with its geometry. */
-export async function scanPage(): Promise<PageMatch[]> {
+/**
+ * Scan the current page and report every sensitive hit with its geometry.
+ * With no selection, emails and phone numbers stay off, matching the checkboxes.
+ */
+export async function scanPage(
+  patternIds: ReadonlySet<string> = idsForSelection(DEFAULT_MASK_TYPES),
+): Promise<PageMatch[]> {
   skipCache = new WeakMap();
   hiddenCache = new WeakMap();
-  enabledPatternIds = null;
+  enabledPatternIds = patternIds;
 
   const matches: PageMatch[] = [];
   await processInBatches(collectTextNodes(), (node) => scanTextNode(node, matches));
