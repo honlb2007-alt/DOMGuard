@@ -11,3 +11,7 @@ export const FREE_DAILY_SCREENSHOTS = 3;
 export const HINT_PROTECT_SEEN_KEY = 'hintProtectSeen';
 export const HINT_CAPTURE_SEEN_KEY = 'hintCaptureSeen';
 export const HINT_TOOLS_SEEN_KEY = 'hintToolsSeen';
+
+/** Last custom capture size, in CSS pixels. Nothing from the page is stored. */
+export const CUSTOM_CAPTURE_WIDTH_KEY = 'customCaptureWidth';
+export const CUSTOM_CAPTURE_HEIGHT_KEY = 'customCaptureHeight';
