@@ -357,6 +357,17 @@ select,
   color: var(--ink);
 }
 
+.btn:active:not(:disabled) {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.btn-primary:active:not(:disabled) {
+  background: var(--ink);
+  border-color: var(--brass);
+  color: var(--brass);
+}
+
 .btn:focus-visible,
 select:focus-visible,
 input:focus-visible {
@@ -365,14 +376,23 @@ input:focus-visible {
 }
 
 .btn:disabled {
-  opacity: 0.45;
+  background: var(--ink);
+  color: var(--muted);
+  border-color: var(--line);
   cursor: not-allowed;
 }
 
 .btn[aria-busy='true']:disabled {
-  opacity: 1;
+  background: var(--surface);
+  color: var(--paper);
   border-color: var(--brass);
   cursor: progress;
+}
+
+.btn-primary[aria-busy='true']:disabled {
+  background: var(--brass);
+  color: var(--ink);
+  border-color: var(--brass);
 }
 
 .pro-marks {

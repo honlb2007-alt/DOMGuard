@@ -2,7 +2,7 @@
 
 DOMGuard hides sensitive information in the current tab before you take a screenshot, and finds hidden text that can steer an AI reading that page.
 
-On a Pro install, **Auto Scan & Mask** covers secrets such as API keys, email addresses, card numbers, and tokens with a black or blurred mask. **Show Hidden Text** marks text that is invisible to a person but still present in the page, including text that could hijack an AI prompt. **Capture visible area** then hides that text, captures the tab, flattens near-background pixels, and copies the picture to the clipboard. An unpaid install can copy a limited number of plain screenshots. The manual picker, clearing masks, and changing mask style stay free.
+On a Pro install, **Auto Scan and Mask** covers secrets such as API keys, email addresses, card numbers, and tokens with a black or blurred mask. While those automatic masks are on, hold Alt to peek at the original text. **Show Hidden Text** marks text that is invisible to a person but still present in the page, including text that could steer an AI prompt. That instruction mark is a best guess, not a guarantee. **Capture visible area** then hides that text, captures the tab, flattens near-background pixels, and copies the picture to the clipboard. An unpaid install can copy a limited number of plain screenshots. The manual picker, clearing masks, and changing mask style stay free.
 
 Scanning, masking, and the pixel pass run in the browser. DOMGuard does not upload page text or screenshots.
 
@@ -59,7 +59,7 @@ Suggested keys come from `manifest.json`. The popup and the welcome page read th
 
 Change them at `chrome://extensions/shortcuts`.
 
-**Capture area** starts a drag. Press the same shortcut again while that tool is open to capture the visible area. The second press does not copy by itself. Dragging copies when the pointer release is allowed to write the clipboard.
+**Capture area** starts a drag. Arrow keys move an 8-pixel box, and Shift plus an arrow changes its size. Enter captures that box once it is at least 8 pixels on each side. Enter before any arrow still captures the visible area. Press the same shortcut again while that tool is open to capture the visible area. The second press does not copy by itself. Dragging copies when the pointer release is allowed to write the clipboard. If the copy does not happen, the card says to press Copy, or to open a normal website and try again.
 
 ## Development rules
 
@@ -101,4 +101,4 @@ Set it back to `false` to return to the free allowance. A production build remov
 npm run package
 ```
 
-This builds `dist`, then writes `domguard-1.1.0.zip` in the project root. The zip contains the files inside `dist`, with `manifest.json` at the archive root. Production builds do not emit source maps.
+This builds `dist`, then writes `domguard-1.1.0.zip` in the project root. That zip is the Chrome Web Store package for version 1.1.0. It contains the files inside `dist`, with `manifest.json` at the archive root. Production builds do not emit source maps. `dist/`, `node_modules/`, and `privacy-site/` stay out of git. The privacy policy that matches this release is [docs/privacy.html](docs/privacy.html).

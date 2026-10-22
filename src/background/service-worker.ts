@@ -22,6 +22,7 @@ import {
   storedBool,
 } from '../content/protect-decision';
 import { cleanScreenshot } from './pixel-clean';
+import { registeredScriptsMatch } from './protect-registration';
 import { computeCropRect } from '../shared/crop';
 import {
   parseExtensionMessage,
@@ -464,26 +465,33 @@ async function hasAllSitesPermission(): Promise<boolean> {
   }
 }
 
-async function registeredScriptIds(): Promise<Set<string>> {
+async function registrationAgrees(settings: ProtectSettings): Promise<boolean> {
+  let actual: { id: string; js?: string[]; runAt?: string }[] = [];
   try {
     const existing = await chrome.scripting.getRegisteredContentScripts({
       ids: [PROTECT_ALL_SCRIPT_ID, AUTO_MASK_SCRIPT_ID],
     });
-    return new Set(existing.map((script) => script.id));
+    actual = existing.map((script) => ({ id: script.id, js: script.js, runAt: script.runAt }));
   } catch {
-    return new Set();
+    actual = [];
   }
-}
-
-async function registrationAgrees(settings: ProtectSettings): Promise<boolean> {
-  const have = await registeredScriptIds();
-  const hideOk = settings.hideText
-    ? have.has(PROTECT_ALL_SCRIPT_ID)
-    : !have.has(PROTECT_ALL_SCRIPT_ID);
-  const maskOk = settings.maskSensitive
-    ? have.has(AUTO_MASK_SCRIPT_ID)
-    : !have.has(AUTO_MASK_SCRIPT_ID);
-  return hideOk && maskOk;
+  return registeredScriptsMatch(
+    [
+      {
+        id: PROTECT_ALL_SCRIPT_ID,
+        file: PROTECT_ALL_FILE,
+        runAt: 'document_start',
+        wanted: settings.hideText,
+      },
+      {
+        id: AUTO_MASK_SCRIPT_ID,
+        file: AUTO_MASK_FILE,
+        runAt: 'document_idle',
+        wanted: settings.maskSensitive,
+      },
+    ],
+    actual,
+  );
 }
 
 async function protectAllState(): Promise<ProtectAllStateResponse> {

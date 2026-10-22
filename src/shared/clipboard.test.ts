@@ -27,6 +27,8 @@ describe('copyFailureNote', () => {
   it('asks for another try once, then says copying is unavailable', () => {
     expect(copyFailureNote(1)).toBe(COPY_FAILED_NOTE);
     expect(copyFailureNote(2)).toBe(COPY_UNAVAILABLE_NOTE);
+    expect(COPY_FAILED_NOTE).toContain('Press Copy');
+    expect(COPY_UNAVAILABLE_NOTE).toContain('Open a normal website');
   });
 });
 

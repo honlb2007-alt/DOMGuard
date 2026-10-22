@@ -2,14 +2,22 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   capList,
+  clearProtectReveal,
+  hasProtectReveal,
+  markProtectReveal,
   nextBoxFrame,
   parseStoredReason,
   REMOVED_ELEMENT_NOTE,
   revealPropertyNames,
   reviewReason,
+  reviewScanHold,
+  reviewStylesheet,
   REVIEW_LIST_LIMIT,
+  shouldMoveReviewFocus,
   shouldScheduleRefresh,
+  focusWhenShown,
 } from './hidden-review-plan';
+import { hiddenReviewStyles } from './hidden-review';
 
 describe('reviewReason', () => {
   it('keeps the reason Protect stored instead of a later visibility reading', () => {
@@ -71,8 +79,63 @@ describe('revealPropertyNames', () => {
     expect(revealPropertyNames('clipped')).not.toContain('font-size');
   });
 
+  it('honours only a mark this extension set, not a page-written attribute', () => {
+    const marked = {} as Element;
+    const forged = {} as Element;
+    expect(hasProtectReveal(forged)).toBe(false);
+    markProtectReveal(marked);
+    expect(hasProtectReveal(marked)).toBe(true);
+    expect(hasProtectReveal(forged)).toBe(false);
+    clearProtectReveal(marked);
+    expect(hasProtectReveal(marked)).toBe(false);
+  });
+
+  it('keeps the scan identity without the preview text', () => {
+    const element = {} as Element;
+    const finding = {
+      element,
+      reason: 'clipped' as const,
+      textLength: 24,
+      preview: 'hidden sentence',
+    };
+    const held = reviewScanHold(finding);
+    expect(held).toEqual({ element, reason: 'clipped', textLength: 24 });
+    expect(Object.keys(held)).toEqual(['element', 'reason', 'textLength']);
+  });
+
   it('uses a plain sentence when the element is gone', () => {
-    expect(REMOVED_ELEMENT_NOTE).toBe('This element is no longer on the page.');
+    expect(REMOVED_ELEMENT_NOTE).toBe('This element is no longer on the page. Refresh the list.');
     expect(REMOVED_ELEMENT_NOTE.includes('<')).toBe(false);
+  });
+});
+
+describe('review focus and motion', () => {
+  it('moves focus only when the panel is opening', () => {
+    expect(shouldMoveReviewFocus(false)).toBe(true);
+    expect(shouldMoveReviewFocus(true)).toBe(false);
+    const focused: string[] = [];
+    const panel = {
+      tabIndex: 0,
+      focus() {
+        focused.push('panel');
+      },
+    };
+    focusWhenShown(panel);
+    expect(panel.tabIndex).toBe(-1);
+    expect(focused).toEqual(['panel']);
+  });
+
+  it('stops the flash animation when reduced motion is requested', () => {
+    const css = reviewStylesheet('.box.flash { animation: domguard-flash 0.35s ease-in-out 3; }');
+    const media = css.slice(css.indexOf('@media'));
+    expect(css).toContain('animation: domguard-flash');
+    expect(media).toContain('prefers-reduced-motion: reduce');
+    expect(media).toContain('.box.flash');
+    expect(media).toContain('animation: none');
+    expect(media).not.toContain('domguard-flash');
+    const applied = hiddenReviewStyles();
+    const appliedMedia = applied.slice(applied.indexOf('@media'));
+    expect(appliedMedia).toContain('prefers-reduced-motion: reduce');
+    expect(appliedMedia).toContain('animation: none');
   });
 });

@@ -42,6 +42,9 @@ export const SHADOW_OBSERVER_LIMIT = 24;
 
 export const SHADOW_DEPTH_LIMIT = 3;
 
+/** Live elements waiting to be measured. One parent must not enqueue every child at once. */
+export const WORK_QUEUE_LIMIT = 2500;
+
 export type ProtectGrade = 'A' | 'B';
 
 export interface CandidateFacts {
@@ -259,6 +262,60 @@ export function degradeLimits(input: DegradeInput): EngineLimits {
   };
 }
 
+/**
+ * Keep the sweep timer only while a pass is unfinished or nodes are still queued.
+ * A finished pass with an empty queue must not schedule another tick.
+ */
+export function shouldRearmSweep(input: {
+  armed: boolean;
+  hidden: boolean;
+  passFinished: boolean;
+  queuedSoon: number;
+  queuedLater: number;
+  queuedRoots: number;
+}): boolean {
+  if (!input.armed || input.hidden) {
+    return false;
+  }
+  if (input.queuedSoon > 0 || input.queuedLater > 0 || input.queuedRoots > 0) {
+    return true;
+  }
+  return !input.passFinished;
+}
+
+/**
+ * The first node in a turn is always measured, so a batch that is already over
+ * budget still makes progress. Later nodes wait for the next turn.
+ */
+export function shouldMeasureNext(measured: number, elapsedMs: number, budgetMs: number): boolean {
+  if (measured <= 0) {
+    return true;
+  }
+  return elapsedMs < budgetMs;
+}
+
+/** True when the work queue is full and this parent should resume after some of it drains. */
+export function shouldParkParent(queueDepth: number, limit = WORK_QUEUE_LIMIT): boolean {
+  return queueDepth >= limit;
+}
+
+/** Drop the consumed prefix and any entry the caller rejects. The next read starts at 0. */
+export function compactQueueEntries<T>(
+  entries: readonly T[],
+  head: number,
+  keep: (entry: T) => boolean,
+): T[] {
+  const kept: T[] = [];
+  const start = head > 0 ? head : 0;
+  for (let index = start; index < entries.length; index += 1) {
+    const entry = entries[index];
+    if (keep(entry)) {
+      kept.push(entry);
+    }
+  }
+  return kept;
+}
+
 /** While degraded, most off-screen nodes are skipped until they scroll into view. */
 export function keepOffscreenSample(index: number, sampleOffscreen: boolean): boolean {
   if (!sampleOffscreen) {
@@ -284,6 +341,7 @@ export function formatEngineDev(input: {
   restored: number;
   batchMs: readonly number[];
   queueMax: number;
+  queueDepth: number;
   firstMs: number;
   cpuRatio: number;
 }): string {
@@ -292,5 +350,5 @@ export function formatEngineDev(input: {
       ? 0
       : input.batchMs.reduce((sum, value) => sum + value, 0) / input.batchMs.length;
   const p95 = percentile(input.batchMs, 95);
-  return `processed:${input.processed} a:${input.hiddenA} b:${input.hiddenB} restored:${input.restored} avg:${avg.toFixed(2)} p95:${p95.toFixed(2)} queue:${input.queueMax} first:${Math.round(input.firstMs)} cpu:${(input.cpuRatio * 100).toFixed(1)}`;
+  return `processed:${input.processed} a:${input.hiddenA} b:${input.hiddenB} restored:${input.restored} avg:${avg.toFixed(2)} p95:${p95.toFixed(2)} queue:${input.queueMax} depth:${input.queueDepth} first:${Math.round(input.firstMs)} cpu:${(input.cpuRatio * 100).toFixed(1)}`;
 }

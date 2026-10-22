@@ -10,9 +10,14 @@ import {
   formatEngineDev,
   isFullyClippedCss,
   keepOffscreenSample,
+  compactQueueEntries,
   orderByViewport,
   percentile,
   planTrackedElement,
+  shouldMeasureNext,
+  shouldParkParent,
+  shouldRearmSweep,
+  WORK_QUEUE_LIMIT,
   type CandidateFacts,
 } from './protect-realtime';
 
@@ -156,6 +161,67 @@ describe('degradeLimits', () => {
   });
 });
 
+describe('shouldRearmSweep', () => {
+  it('stops after a finished pass when nothing is queued', () => {
+    expect(
+      shouldRearmSweep({
+        armed: true,
+        hidden: false,
+        passFinished: true,
+        queuedSoon: 0,
+        queuedLater: 0,
+        queuedRoots: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it('continues an unfinished pass and any pass that still has queued nodes', () => {
+    expect(
+      shouldRearmSweep({
+        armed: true,
+        hidden: false,
+        passFinished: false,
+        queuedSoon: 0,
+        queuedLater: 0,
+        queuedRoots: 0,
+      }),
+    ).toBe(true);
+    expect(
+      shouldRearmSweep({
+        armed: true,
+        hidden: false,
+        passFinished: true,
+        queuedSoon: 1,
+        queuedLater: 0,
+        queuedRoots: 0,
+      }),
+    ).toBe(true);
+  });
+
+  it('stays off when protection is stopped or the tab is hidden', () => {
+    expect(
+      shouldRearmSweep({
+        armed: false,
+        hidden: false,
+        passFinished: false,
+        queuedSoon: 2,
+        queuedLater: 0,
+        queuedRoots: 1,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRearmSweep({
+        armed: true,
+        hidden: true,
+        passFinished: false,
+        queuedSoon: 2,
+        queuedLater: 0,
+        queuedRoots: 0,
+      }),
+    ).toBe(false);
+  });
+});
+
 describe('demo pages', () => {
   const demo = 'TEST ONLY - case 1 hidden instruction demo';
   const darkRow = 'Alex Rivera — See you at the station after work';
@@ -212,6 +278,7 @@ describe('formatEngineDev', () => {
       restored: 1,
       batchMs: [1, 2, 3, 4],
       queueMax: 8,
+      queueDepth: 3,
       firstMs: 12.4,
       cpuRatio: 0.021,
     });
@@ -220,7 +287,31 @@ describe('formatEngineDev', () => {
     expect(line).toContain('b:1');
     expect(line).toContain('restored:1');
     expect(line).toContain('queue:8');
+    expect(line).toContain('depth:3');
     expect(percentile([1, 2, 3, 4], 95)).toBe(4);
     expect(line.includes(TRAP)).toBe(false);
+  });
+});
+
+describe('shouldMeasureNext', () => {
+  it('measures the first node even when the budget is already spent', () => {
+    expect(shouldMeasureNext(0, 20, 4)).toBe(true);
+    expect(shouldMeasureNext(1, 3.9, 4)).toBe(true);
+    expect(shouldMeasureNext(1, 4, 4)).toBe(false);
+    expect(shouldMeasureNext(8, 9, 8)).toBe(false);
+  });
+});
+
+describe('work queue bounds', () => {
+  it('parks a parent once the live queue reaches the limit', () => {
+    expect(shouldParkParent(WORK_QUEUE_LIMIT - 1)).toBe(false);
+    expect(shouldParkParent(WORK_QUEUE_LIMIT)).toBe(true);
+    expect(shouldParkParent(3, 3)).toBe(true);
+  });
+
+  it('drops the consumed prefix and entries that are no longer live', () => {
+    const entries = ['gone', 'done', 'live', 'detached', 'next'];
+    const kept = compactQueueEntries(entries, 1, (entry) => entry === 'live' || entry === 'next');
+    expect(kept).toEqual(['live', 'next']);
   });
 });

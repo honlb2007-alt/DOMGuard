@@ -1,5 +1,5 @@
-// Region capture overlay and the clipboard card. The image stays in memory
-// until the card closes. It is not stored and not logged.
+// Region capture overlay and the clipboard card. The picture is not stored
+// and not logged. The blob is kept only while the card still offers Copy.
 
 import {
   COPY_FAILED_NOTE,
@@ -11,6 +11,8 @@ import {
 import type { CaptureRegionMessage, ExtensionResponse } from '../shared/messages';
 
 const MIN_DRAG_PX = 8;
+/** One arrow key moves or resizes the keyboard region by the 8px grid. */
+export const KEYBOARD_REGION_STEP = 8;
 const CARD_DISMISS_MS = 4000;
 const BLOCKED_BADGE_NOTE = "This page can't be changed. Open a normal website, then try again.";
 const GENERIC_ERROR = "Couldn't capture this area. Try again.";
@@ -48,6 +50,115 @@ let capturing = false;
 let cardHost: HTMLElement | null = null;
 let cardTimer = 0;
 let cardBlob: Blob | null = null;
+
+/** Copy is the only reason to keep the picture after the thumbnail is on screen. */
+export function keepsCaptureBlob(state: 'copied' | 'failed' | 'ready' | 'unavailable'): boolean {
+  return state === 'failed' || state === 'ready';
+}
+
+export function isRegionArrowKey(key: string): boolean {
+  return key === 'ArrowLeft' || key === 'ArrowRight' || key === 'ArrowUp' || key === 'ArrowDown';
+}
+
+function arrowDelta(key: string, step: number): { x: number; y: number } | null {
+  if (key === 'ArrowLeft') {
+    return { x: -step, y: 0 };
+  }
+  if (key === 'ArrowRight') {
+    return { x: step, y: 0 };
+  }
+  if (key === 'ArrowUp') {
+    return { x: 0, y: -step };
+  }
+  if (key === 'ArrowDown') {
+    return { x: 0, y: step };
+  }
+  return null;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+/** A minimum box in the middle of the viewport, ready for the first arrow key. */
+function centeredKeyboardRegion(
+  viewport: { width: number; height: number },
+  step: number,
+): CssRect {
+  const width = Math.min(step, Math.max(viewport.width, 0));
+  const height = Math.min(step, Math.max(viewport.height, 0));
+  return {
+    x: clamp(Math.round((viewport.width - width) / 2), 0, Math.max(viewport.width - width, 0)),
+    y: clamp(Math.round((viewport.height - height) / 2), 0, Math.max(viewport.height - height, 0)),
+    width,
+    height,
+  };
+}
+
+/**
+ * Arrow keys move the region. Shift and an arrow resize it from the bottom-right.
+ * The first arrow creates the region, so Enter can capture it instead of the viewport.
+ */
+export function applyKeyboardRegion(
+  current: CssRect | null,
+  key: string,
+  shiftKey: boolean,
+  viewport: { width: number; height: number },
+  step = KEYBOARD_REGION_STEP,
+): CssRect | null {
+  const delta = arrowDelta(key, step);
+  if (!delta) {
+    return null;
+  }
+  const base = current ?? centeredKeyboardRegion(viewport, step);
+  if (shiftKey) {
+    const width = clamp(base.width + delta.x, Math.min(step, viewport.width), viewport.width);
+    const height = clamp(base.height + delta.y, Math.min(step, viewport.height), viewport.height);
+    return {
+      x: clamp(base.x, 0, Math.max(viewport.width - width, 0)),
+      y: clamp(base.y, 0, Math.max(viewport.height - height, 0)),
+      width,
+      height,
+    };
+  }
+  if (!current) {
+    return {
+      x: clamp(base.x + delta.x, 0, Math.max(viewport.width - base.width, 0)),
+      y: clamp(base.y + delta.y, 0, Math.max(viewport.height - base.height, 0)),
+      width: base.width,
+      height: base.height,
+    };
+  }
+  return {
+    x: clamp(current.x + delta.x, 0, Math.max(viewport.width - current.width, 0)),
+    y: clamp(current.y + delta.y, 0, Math.max(viewport.height - current.height, 0)),
+    width: current.width,
+    height: current.height,
+  };
+}
+
+/** Enter captures the keyboard region once it is large enough, otherwise the viewport. */
+export function keyboardCaptureRect(
+  current: CssRect | null,
+  viewport: { width: number; height: number },
+  minimum = MIN_DRAG_PX,
+): CssRect {
+  if (current && current.width >= minimum && current.height >= minimum) {
+    return current;
+  }
+  return { x: 0, y: 0, width: viewport.width, height: viewport.height };
+}
+
+/** Announce the card note, and move focus into the card without landing on a button. */
+export function markLiveNote(element: { setAttribute(name: string, value: string): void }): void {
+  element.setAttribute('role', 'status');
+  element.setAttribute('aria-live', 'polite');
+}
+
+export function focusWhenShown(element: { tabIndex: number; focus(): void }): void {
+  element.tabIndex = -1;
+  element.focus();
+}
 /** One successful paste counts once, including a later Copy click. */
 let copyCounted = false;
 let copyGeneration = 0;
@@ -216,7 +327,7 @@ function closeCard(): void {
 
 function showCard(blob: Blob, dataUrl: string, state: 'copied' | 'failed' | 'ready' | 'unavailable'): void {
   closeCard();
-  cardBlob = blob;
+  cardBlob = keepsCaptureBlob(state) ? blob : null;
   if (state === 'copied') {
     noteCopied();
   }
@@ -236,6 +347,7 @@ function showCard(blob: Blob, dataUrl: string, state: 'copied' | 'failed' | 'rea
 
   const note = document.createElement('p');
   note.className = 'note';
+  markLiveNote(note);
   note.textContent =
     state === 'copied'
       ? copiedToClipboardNote(navigator.userAgent)
@@ -286,6 +398,7 @@ function showCard(blob: Blob, dataUrl: string, state: 'copied' | 'failed' | 'rea
   shadow.append(style, card);
   document.documentElement.append(host);
   cardHost = host;
+  focusWhenShown(card);
 
   if (state === 'copied') {
     cardTimer = window.setTimeout(() => {
@@ -320,6 +433,7 @@ function showTextCard(text: string): void {
   card.className = 'card';
   const note = document.createElement('p');
   note.className = 'note';
+  markLiveNote(note);
   note.textContent = text;
   const closeButton = document.createElement('button');
   closeButton.type = 'button';
@@ -334,6 +448,7 @@ function showTextCard(text: string): void {
   shadow.append(style, card);
   document.documentElement.append(host);
   cardHost = host;
+  focusWhenShown(card);
 }
 
 async function deliver(dataUrl: string): Promise<void> {
@@ -475,6 +590,7 @@ export function startRegionSelection(custom?: { width: number; height: number })
   let lockedX = window.scrollX;
   let lockedY = window.scrollY;
   let done = false;
+  let keyboardRect: CssRect | null = null;
 
   function layout(rect: CssRect): void {
     const x = rect.x;
@@ -596,14 +712,32 @@ export function startRegionSelection(custom?: { width: number; height: number })
       teardown();
       return;
     }
-    if (customCss && (event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+    if (customCss && isRegionArrowKey(event.key)) {
       event.preventDefault();
       nudge(event.key);
       return;
     }
+    if (!customCss && isRegionArrowKey(event.key)) {
+      const next = applyKeyboardRegion(keyboardRect, event.key, event.shiftKey, {
+        width: window.innerWidth,
+        height: window.innerHeight,
+      });
+      if (next) {
+        event.preventDefault();
+        keyboardRect = next;
+        layout(next);
+      }
+      return;
+    }
     if (!customCss && event.key === 'Enter') {
       event.preventDefault();
-      finish({ x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }, true);
+      finish(
+        keyboardCaptureRect(keyboardRect, {
+          width: window.innerWidth,
+          height: window.innerHeight,
+        }),
+        true,
+      );
       return;
     }
     if (SCROLL_KEYS.has(event.key)) {
@@ -619,6 +753,7 @@ export function startRegionSelection(custom?: { width: number; height: number })
       finish(box, true);
       return;
     }
+    keyboardRect = null;
     dragging = true;
     current.dragging = true;
     originX = event.clientX;

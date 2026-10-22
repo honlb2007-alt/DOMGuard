@@ -1,18 +1,25 @@
-// On-page hidden-text review. Page text is written with textContent and dropped
-// when the panel closes. It is not stored, logged, or sent anywhere.
+// On-page hidden-text review. The preview is written with textContent.
+// The retained scan is the element, reason, and length. It is not stored or logged.
 
 import type { HiddenFinding } from './hidden-text';
 import { detectReviewFindings } from './hidden-text';
 import {
   capList,
   nextBoxFrame,
+  clearProtectReveal,
+  markProtectReveal,
   PROTECT_REVEAL_ATTR,
+  reviewScanHold,
+  type ReviewScanHold,
   REMOVED_ELEMENT_NOTE,
   revealPropertyNames,
   REVIEW_LIST_LABEL,
   REVIEW_LIST_LIMIT,
   REVIEW_REFRESH_MS,
   REVIEW_REGION_LABEL,
+  focusWhenShown,
+  reviewStylesheet,
+  shouldMoveReviewFocus,
   shouldScheduleRefresh,
 } from './hidden-review-plan';
 import { ensureReviewRoot, removeReviewRoot } from './masker';
@@ -32,7 +39,7 @@ const REASON_LABELS: Record<HiddenReason, string> = {
   clipped: 'Clipped',
 };
 
-const REVIEW_CSS = `
+const REVIEW_CSS = reviewStylesheet(`
   .review {
     position: fixed;
     inset: 0;
@@ -167,7 +174,12 @@ const REVIEW_CSS = `
       background: rgba(226, 177, 90, 0.35);
     }
   }
-`;
+`);
+
+/** The stylesheet actually applied to the review panel. */
+export function hiddenReviewStyles(): string {
+  return REVIEW_CSS;
+}
 
 interface SavedProp {
   value: string;
@@ -199,7 +211,7 @@ interface ReviewSession {
   frame: number;
   refreshTimer: number;
   observer: MutationObserver | null;
-  scan: readonly HiddenFinding[];
+  scan: readonly ReviewScanHold[];
 }
 
 let session: ReviewSession | null = null;
@@ -275,6 +287,7 @@ function restoreRow(row: ReviewRow): void {
     }
     element.removeAttribute(PROTECT_REVEAL_ATTR);
   }
+  clearProtectReveal(row.element);
   row.saved = null;
   row.revealed = false;
   if (row.revealButton) {
@@ -341,6 +354,7 @@ function revealRow(current: ReviewSession, row: ReviewRow, status: HTMLElement):
     saved: readProp(element, name),
   }));
   element.setAttribute(PROTECT_REVEAL_ATTR, '');
+  markProtectReveal(element);
   paintReadable(element, row.reason);
   row.saved = props;
   row.revealed = true;
@@ -385,6 +399,7 @@ function flash(current: ReviewSession, box: HTMLDivElement): void {
 }
 
 export function showHiddenReview(findings: readonly HiddenFinding[]): void {
+  const wasOpen = session !== null;
   dismissHiddenReview();
 
   const ranked = findings
@@ -492,7 +507,7 @@ export function showHiddenReview(findings: readonly HiddenFinding[]): void {
     if (item.flagged) {
       const flag = document.createElement('span');
       flag.className = 'flag';
-      flag.textContent = 'Looks like an instruction to an AI (heuristic)';
+      flag.textContent = 'Looks like an instruction to an AI. This is a best guess, not a guarantee.';
       button.append(flag);
     }
     if (!item.visible) {
@@ -572,6 +587,9 @@ export function showHiddenReview(findings: readonly HiddenFinding[]): void {
   }
 
   root.append(style, boxes, panel);
+  if (shouldMoveReviewFocus(wasOpen)) {
+    focusWhenShown(panel);
+  }
   drawBoxes(rows);
 
   const current: ReviewSession = {
@@ -581,7 +599,7 @@ export function showHiddenReview(findings: readonly HiddenFinding[]): void {
     frame: 0,
     refreshTimer: 0,
     observer: null,
-    scan: findings,
+    scan: findings.map(reviewScanHold),
     onKey: (event) => {
       if (!event.isTrusted || event.key !== 'Escape') {
         return;

@@ -14,9 +14,9 @@ export function dataUrlToPngBlob(dataUrl: string): Blob {
   return new Blob([bytes], { type: 'image/png' });
 }
 
-export const COPY_FAILED_NOTE = "Couldn't copy automatically.";
+export const COPY_FAILED_NOTE = "Couldn't copy automatically. Press Copy to try again.";
 
-export const COPY_UNAVAILABLE_NOTE = "Copying isn't available on this page.";
+export const COPY_UNAVAILABLE_NOTE = "Copying isn't available on this page. Open a normal website, then try again.";
 
 export const READY_TO_COPY_NOTE = 'Ready to copy.';
 

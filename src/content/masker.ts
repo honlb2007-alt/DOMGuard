@@ -4,6 +4,7 @@
 // on top of them and re-measure their geometry instead of modifying them.
 
 import type { MaskStyle } from '../shared/messages';
+import { shouldHideForPeek } from './alt-peek';
 import { GUARD_ATTRIBUTE, type MaskTarget, type PageMatch } from './scanner';
 
 export interface MaskHandle {
@@ -396,13 +397,17 @@ function dropEntry(entry: MaskEntry): void {
 
 let peeled = false;
 
-/** Hide every DOMGuard overlay while Alt is held. The page itself is not edited. */
+/** Hide mask overlays while Alt is held. Region and clipboard chrome stay up. */
 export function setMasksPeeled(next: boolean): void {
   peeled = next;
   for (const element of document.querySelectorAll(`[${GUARD_ATTRIBUTE}]`)) {
-    if (element instanceof HTMLElement) {
-      element.style.setProperty('visibility', next ? 'hidden' : 'visible', 'important');
+    if (!(element instanceof HTMLElement)) {
+      continue;
     }
+    if (!shouldHideForPeek(element.getAttribute(GUARD_ATTRIBUTE))) {
+      continue;
+    }
+    element.style.setProperty('visibility', next ? 'hidden' : 'visible', 'important');
   }
 }
 

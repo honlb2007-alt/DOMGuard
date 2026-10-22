@@ -10,10 +10,12 @@ import {
 } from './hidden-text';
 import { dismissHiddenReview, showHiddenReview } from './hidden-review';
 import { startRegionSelection } from './region-capture';
+import { altPeekIntent } from './alt-peek';
 import {
   applyMasks,
   clearMasks as clearAllMasks,
   maskCount,
+  setMasksPeeled,
   setRescanRequestHandler,
   stopAutoRescan,
   updateMaskStyle,
@@ -184,6 +186,22 @@ if (globalWithFlag[INJECTION_FLAG] !== true) {
       }
       await runScan(maskStyle);
     })();
+  });
+
+  window.addEventListener('keydown', (event) => {
+    if (altPeekIntent(event) === 'peel') {
+      setMasksPeeled(true);
+    }
+  });
+  window.addEventListener('keyup', (event) => {
+    if (altPeekIntent(event) === 'restore') {
+      setMasksPeeled(false);
+    }
+  });
+  window.addEventListener('blur', (event) => {
+    if (altPeekIntent(event) === 'restore') {
+      setMasksPeeled(false);
+    }
   });
 
   chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {

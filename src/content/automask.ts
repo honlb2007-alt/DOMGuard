@@ -27,6 +27,7 @@ import {
   shouldRunOnHost,
   storedBool,
 } from './protect-decision';
+import { altPeekIntent } from './alt-peek';
 import { collectFieldsUnder, collectTextNodesUnder, scanCollected } from './scanner';
 import { parseExtensionMessage, type MaskStyle } from '../shared/messages';
 import { DEFAULT_MASK_TYPES, enabledPatternIds, type MaskTypeSelection } from '../shared/patterns';
@@ -332,22 +333,19 @@ function listen(): void {
     return true;
   });
   window.addEventListener('keydown', (event) => {
-    if (!event.isTrusted || event.repeat || event.key !== 'Alt') {
-      return;
+    if (altPeekIntent(event) === 'peel') {
+      setMasksPeeled(true);
     }
-    setMasksPeeled(true);
   });
   window.addEventListener('keyup', (event) => {
-    if (!event.isTrusted || event.altKey) {
-      return;
+    if (altPeekIntent(event) === 'restore') {
+      setMasksPeeled(false);
     }
-    setMasksPeeled(false);
   });
   window.addEventListener('blur', (event) => {
-    if (!event.isTrusted) {
-      return;
+    if (altPeekIntent(event) === 'restore') {
+      setMasksPeeled(false);
     }
-    setMasksPeeled(false);
   });
 }
 

@@ -24,7 +24,12 @@ import {
   releaseProtectElement,
   restoreAfterCapture,
 } from './hidden-text';
-import { PROTECT_REASON_ATTR, PROTECT_REVEAL_ATTR } from './hidden-review-plan';
+import {
+  clearProtectReveal,
+  hasProtectReveal,
+  PROTECT_REASON_ATTR,
+  PROTECT_REVEAL_ATTR,
+} from './hidden-review-plan';
 import {
   advanceEdgeConfirmation,
   classifyCandidate,
@@ -38,8 +43,12 @@ import {
   intersectsViewport,
   isFullyClippedCss,
   keepOffscreenSample,
-  orderByViewport,
   planTrackedElement,
+  shouldMeasureNext,
+  shouldParkParent,
+  shouldRearmSweep,
+  compactQueueEntries,
+  WORK_QUEUE_LIMIT,
   SHADOW_DEPTH_LIMIT,
   SHADOW_OBSERVER_LIMIT,
   SLOW_SLICE_MS,
@@ -88,6 +97,8 @@ interface Measured {
   grade: 'A' | 'B' | null;
   reason: HiddenReason | null;
   inlineCleared: boolean;
+  /** Read before any hide or restore in this turn. B-class confirmation uses it. */
+  moving: boolean;
 }
 
 let armed = false;
@@ -128,6 +139,10 @@ const shadowObservers = new Map<ShadowRoot, MutationObserver>();
 const shadowDepth = new WeakMap<ShadowRoot, number>();
 const hides: { at: number; chars: number }[] = [];
 const flips: { at: number; key: number }[] = [];
+const pendingRelease: Element[] = [];
+const childCursor = new WeakMap<Element, number>();
+let discovered = new WeakSet<Element>();
+let queueDirty = false;
 
 let soonHead = 0;
 let laterHead = 0;
@@ -171,8 +186,12 @@ function keyOf(element: Element): number {
   return key;
 }
 
+function queueDepth(): number {
+  return soon.length - soonHead + (later.length - laterHead) + roots.length;
+}
+
 function noteQueue(): void {
-  const size = soon.length - soonHead + (later.length - laterHead) + roots.length;
+  const size = queueDepth();
   if (size > queueMax) {
     queueMax = size;
   }
@@ -214,6 +233,7 @@ function publishDev(): void {
       restored,
       batchMs,
       queueMax,
+      queueDepth: queueDepth(),
       firstMs,
       cpuRatio: lastCpu,
     }),
@@ -236,6 +256,7 @@ function pushWork(element: Element, inViewport: boolean | null): void {
   if (SKIP_TAGS.has(element.tagName) || element.closest('[data-domguard]')) {
     return;
   }
+  discovered.add(element);
   queued.add(element);
   if (inViewport === false) {
     later.push(element);
@@ -335,13 +356,13 @@ function forget(node: Node): void {
     if (!(current instanceof Element)) {
       continue;
     }
+    clearProtectReveal(current);
+    childCursor.delete(current);
+    queued.delete(current);
+    queueDirty = true;
     if (tracked.has(current)) {
       tracked.delete(current);
-      withWrite(() => {
-        current.removeAttribute(PROTECT_REASON_ATTR);
-        current.removeAttribute(PROTECT_REVEAL_ATTR);
-        releaseProtectElement(current);
-      });
+      pendingRelease.push(current);
     }
     edgeClocks.delete(current);
     edgeGen.delete(current);
@@ -399,12 +420,60 @@ function onRecords(records: MutationRecord[]): void {
       pushWork(record.target, null);
     }
   }
+  if (queueDirty) {
+    compactWork();
+    queueDirty = false;
+  }
   const batch = take(soon, soonCursor(), limits.fastLimit);
   if (batch.length > 0) {
-    processElements(batch, limits.fastBudgetMs || FAST_PATH_BUDGET_MS);
+    processElements(batch, limits.fastBudgetMs || FAST_PATH_BUDGET_MS, 'soon');
+  } else {
+    pump();
+  }
+  flushRelease();
+}
+
+function compactWork(): void {
+  const soonKept = compactQueueEntries(
+    soon,
+    soonHead,
+    (element) => element.isConnected && queued.has(element),
+  );
+  soon.length = 0;
+  for (const element of soonKept) {
+    soon.push(element);
+  }
+  soonHead = 0;
+  const laterKept = compactQueueEntries(
+    later,
+    laterHead,
+    (element) => element.isConnected && queued.has(element),
+  );
+  later.length = 0;
+  for (const element of laterKept) {
+    later.push(element);
+  }
+  laterHead = 0;
+  const rootsKept = compactQueueEntries(roots, 0, (element) => element.isConnected);
+  roots.length = 0;
+  for (const element of rootsKept) {
+    roots.push(element);
+  }
+}
+
+/** Style restores wait until this turn's layout reads are finished. */
+function flushRelease(): void {
+  if (pendingRelease.length === 0) {
     return;
   }
-  pump();
+  const pending = pendingRelease.splice(0, pendingRelease.length);
+  for (const element of pending) {
+    withWrite(() => {
+      element.removeAttribute(PROTECT_REASON_ATTR);
+      element.removeAttribute(PROTECT_REVEAL_ATTR);
+      releaseProtectElement(element);
+    });
+  }
 }
 
 function cachedStyle(element: Element, cache: Map<Element, CSSStyleDeclaration>): CSSStyleDeclaration {
@@ -459,11 +528,13 @@ function combinedOpacity(element: Element, cache: Map<Element, CSSStyleDeclarati
   return opacity;
 }
 
-function measure(elements: Element[]): Measured[] {
+function measure(
+  elements: Element[],
+  cache: Map<Element, CSSStyleDeclaration> = new Map(),
+): Measured[] {
   const live = elements.filter(
     (element) => element.isConnected && !SKIP_TAGS.has(element.tagName) && !element.closest('[data-domguard]'),
   );
-  const cache = new Map<Element, CSSStyleDeclaration>();
   const styles = live.map((element) => cachedStyle(element, cache));
   const rects = live.map((element) => element.getBoundingClientRect());
   for (const element of live) {
@@ -538,6 +609,7 @@ function measure(elements: Element[]): Measured[] {
       grade: decision.grade,
       reason: decision.reason,
       inlineCleared: protectInlineCleared(element),
+      moving: false,
     });
   }
   return measured;
@@ -657,6 +729,7 @@ function restoreElement(element: Element): void {
   withWrite(() => {
     element.removeAttribute(PROTECT_REASON_ATTR);
     element.removeAttribute(PROTECT_REVEAL_ATTR);
+    clearProtectReveal(element);
     releaseProtectElement(element);
   });
   restored += 1;
@@ -710,7 +783,7 @@ function noteEdge(item: Measured): void {
     edgeClocks.get(item.element) ?? null,
     performance.now(),
     true,
-    isInMotion(item.element),
+    item.moving,
   );
   if (step.hide) {
     edgeClocks.delete(item.element);
@@ -759,7 +832,7 @@ function reviewEdge(element: Element): void {
 }
 
 function applyMeasured(item: Measured): void {
-  if (item.element.hasAttribute(PROTECT_REVEAL_ATTR)) {
+  if (hasProtectReveal(item.element)) {
     return;
   }
   const qualifies = item.grade !== null;
@@ -787,35 +860,33 @@ function applyMeasured(item: Measured): void {
   noteEdge(item);
 }
 
-function processElements(elements: Element[], budgetMs: number): void {
+function processElements(elements: Element[], budgetMs: number, lane: 'soon' | 'later'): void {
   const startedAt = performance.now();
-  const viewport = { width: window.innerWidth, height: window.innerHeight };
-  const ranked = elements.map((element) => {
-    const rect = element.isConnected ? element.getBoundingClientRect() : null;
-    return {
-      element,
-      inViewport: rect !== null && intersectsViewport(rect, viewport, 0),
-    };
-  });
-  const ordered = orderByViewport(ranked);
-  const selected: Element[] = [];
-  const deferred: { element: Element; inViewport: boolean }[] = [];
-  for (const item of ordered) {
-    // On-screen nodes are the ones a recording would catch, so they stay in this turn.
-    const onScreen = item.inViewport && selected.length < limits.fastLimit;
-    if (onScreen || performance.now() - startedAt < budgetMs) {
-      selected.push(item.element);
-    } else {
-      deferred.push(item);
+  const cache = new Map<Element, CSSStyleDeclaration>();
+  const held: Measured[] = [];
+  let deferredAt = elements.length;
+  let index = 0;
+  while (index < elements.length) {
+    if (!shouldMeasureNext(held.length, performance.now() - startedAt, budgetMs)) {
+      deferredAt = index;
+      break;
     }
+    const end = Math.min(elements.length, index + 8);
+    const found = measure(elements.slice(index, end), cache);
+    for (const item of found) {
+      if (item.grade === 'B') {
+        item.moving = isInMotion(item.element);
+      }
+      held.push(item);
+    }
+    index = end;
   }
-  const measured = measure(selected);
-  for (const item of measured) {
+  for (const item of held) {
     processed += 1;
     applyMeasured(item);
   }
-  for (const item of deferred) {
-    pushWork(item.element, item.inViewport);
+  for (let index = deferredAt; index < elements.length; index += 1) {
+    pushWork(elements[index], lane === 'later' ? false : null);
   }
   const elapsed = performance.now() - startedAt;
   batchMs.push(elapsed);
@@ -839,22 +910,42 @@ function expandRoots(maxNodes: number, budgetMs: number): void {
     if (element.shadowRoot) {
       watchShadow(element.shadowRoot, depthOf(element) + 1);
       for (const child of element.shadowRoot.children) {
-        roots.push(child);
+        if (!discovered.has(child)) {
+          roots.push(child);
+        }
       }
     }
-    if (elementOwnText(element).length > 0) {
+    if (elementOwnText(element).length > 0 && !discovered.has(element)) {
       const rect = element.getBoundingClientRect();
       pushWork(element, intersectsViewport(rect, viewport, 0));
     }
+    discovered.add(element);
     seen += 1;
-    for (let index = element.children.length - 1; index >= 0; index -= 1) {
-      const child = element.children[index];
-      if (!SKIP_TAGS.has(child.tagName)) {
-        roots.push(child);
-      }
+    if (!pushLightChildren(element)) {
+      break;
     }
   }
   account(performance.now() - startedAt);
+}
+
+/** Resume a large parent later instead of putting every child on the queue now. */
+function pushLightChildren(element: Element): boolean {
+  const children = element.children;
+  let index = childCursor.get(element) ?? children.length;
+  while (index > 0) {
+    if (shouldParkParent(queueDepth())) {
+      childCursor.set(element, index);
+      roots.unshift(element);
+      return false;
+    }
+    index -= 1;
+    const child = children[index];
+    if (!SKIP_TAGS.has(child.tagName) && !discovered.has(child)) {
+      roots.push(child);
+    }
+  }
+  childCursor.delete(element);
+  return true;
 }
 
 function scheduleIdle(): void {
@@ -885,7 +976,7 @@ function scheduleIdle(): void {
       laterHead = 0;
     }
     if (batch.length > 0) {
-      processElements(batch, SLOW_SLICE_MS);
+      processElements(batch, SLOW_SLICE_MS, 'later');
       return;
     }
     pump();
@@ -902,13 +993,13 @@ function pump(): void {
   if (!armed || rafHandle || idleHandle) {
     return;
   }
-  if (soon.length > soonHead || roots.length > 0) {
+  if (soon.length > soonHead) {
     rafHandle = requestAnimationFrame(() => {
       rafHandle = 0;
       expandRoots(40, SLOW_SLICE_MS);
       const batch = take(soon, soonCursor(), limits.fastLimit);
       if (batch.length > 0) {
-        processElements(batch, SLOW_SLICE_MS);
+        processElements(batch, SLOW_SLICE_MS, 'soon');
         return;
       }
       pump();
@@ -917,6 +1008,14 @@ function pump(): void {
   }
   if (later.length > laterHead) {
     scheduleIdle();
+    return;
+  }
+  if (roots.length > 0) {
+    rafHandle = requestAnimationFrame(() => {
+      rafHandle = 0;
+      expandRoots(40, SLOW_SLICE_MS);
+      pump();
+    });
     return;
   }
   if (initialPending) {
@@ -962,7 +1061,7 @@ function runSweep(): void {
   sweepCursor = node;
   account(performance.now() - startedAt);
   if (batch.length > 0) {
-    processElements(batch, SWEEP_BUDGET_MS);
+    processElements(batch, SWEEP_BUDGET_MS, 'soon');
   }
 }
 
@@ -978,7 +1077,18 @@ function armSweep(): void {
       return;
     }
     runSweep();
-    armSweep();
+    if (
+      shouldRearmSweep({
+        armed,
+        hidden: document.hidden,
+        passFinished: sweepCursor === null,
+        queuedSoon: Math.max(0, soon.length - soonHead),
+        queuedLater: Math.max(0, later.length - laterHead),
+        queuedRoots: roots.length,
+      })
+    ) {
+      armSweep();
+    }
   }, delay);
 }
 
@@ -1036,6 +1146,7 @@ function stopAndRestore(): void {
   soonHead = 0;
   laterHead = 0;
   queued.clear();
+  discovered = new WeakSet();
   tracked.clear();
   restoreAfterCapture();
   publishDev();

@@ -26,10 +26,11 @@ import {
   dataUrlToPngBlob,
 } from '../shared/clipboard';
 import { isBlockedPageUrl } from './page-access';
+import { unpaidScreenshotQuotaText } from './quota-copy';
 import { normalizeStoredHostname, shouldRunOnHost } from '../content/protect-decision';
 
 const PICKER_LABEL = 'Manual picker';
-const SCAN_LABEL = 'Auto Scan & Mask';
+const SCAN_LABEL = 'Auto Scan and Mask';
 const HIDDEN_TEXT_LABEL = 'Show Hidden Text';
 const SCREENSHOT_LABEL = 'Capture visible area';
 const GENERIC_ERROR = 'Something went wrong. Try again in a moment.';
@@ -169,9 +170,7 @@ function renderPlan(): void {
     quotaLine.textContent = paid
       ? 'Unlimited screenshots'
       : unpaid
-        ? remaining <= 0
-          ? `0 of ${limit} safe screenshots left today. Upgrade to keep capturing.`
-          : `${remaining} of ${limit} safe screenshots left today`
+        ? unpaidScreenshotQuotaText(remaining, limit)
         : 'Checking plan…';
   }
 
@@ -684,7 +683,7 @@ const PROTECT_SCRIPT_FAILED = "Couldn't turn on Protect all sites. Turn it off, 
 const PROTECT_PRO_ONLY = 'Protect all sites is part of Pro. Upgrade to turn it on.';
 const PROTECT_ON_SITE = 'On. Hiding hidden text as pages load and change.';
 const PROTECT_PAUSED = 'Paused on this site.';
-const PROTECT_PAGE_BLOCKED = "Can't run on this page. Chrome blocks extensions here.";
+const PROTECT_PAGE_BLOCKED = "Can't run on this page. Chrome blocks extensions here. Open a normal website, then try again.";
 const GRANT_NEEDED = 'Protect all sites needs permission. Turn it on here to allow access.';
 const PRO_UNVERIFIED = "Couldn't confirm Pro just now. Check your connection, then try again.";
 const HOST_UNAVAILABLE = 'This page did not share its address. Open the site, then try again.';
