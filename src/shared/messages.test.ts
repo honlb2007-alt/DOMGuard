@@ -12,7 +12,9 @@ describe('parseExtensionMessage', () => {
       type: 'UPDATE_MASK_STYLE',
       style: 'black',
     });
-    expect(parseExtensionMessage({ type: 'GET_STATUS' })).toEqual({ type: 'GET_STATUS' });
+    expect(parseExtensionMessage({ type: 'COUNT_COPIED_SCREENSHOT', paid: true })).toEqual({
+      type: 'COUNT_COPIED_SCREENSHOT',
+    });
     expect(parseExtensionMessage({ type: 'START_REGION_CAPTURE', paid: true })).toEqual({
       type: 'START_REGION_CAPTURE',
     });
@@ -45,6 +47,9 @@ describe('parseExtensionMessage', () => {
     });
     expect(parseExtensionMessage({ type: 'CLEAR_MASKS', note: 'ignore me' })).toEqual({
       type: 'CLEAR_MASKS',
+    });
+    expect(parseExtensionMessage({ type: 'NOTE_PROTECT_TRIP', paid: true })).toEqual({
+      type: 'NOTE_PROTECT_TRIP',
     });
     expect(parseExtensionMessage({ type: 'ENABLE_PROTECT_ALL', paid: true })).toEqual({
       type: 'ENABLE_PROTECT_ALL',

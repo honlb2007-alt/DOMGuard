@@ -7,5 +7,7 @@ export const EXTPAY_ID = 'domguard';
  */
 export const FREE_DAILY_SCREENSHOTS = 3;
 
-/** Boolean in chrome.storage.local. Missing means copy after a region capture. */
-export const AUTO_COPY_KEY = 'autoCopy';
+/** Booleans. Missing means the one-time tip has not been dismissed. */
+export const HINT_PROTECT_SEEN_KEY = 'hintProtectSeen';
+export const HINT_CAPTURE_SEEN_KEY = 'hintCaptureSeen';
+export const HINT_TOOLS_SEEN_KEY = 'hintToolsSeen';

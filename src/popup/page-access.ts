@@ -23,11 +23,19 @@ const BLOCKED_PROTOCOLS = new Set([
 
 const STORE_HOSTS = new Set(['chrome.google.com', 'chromewebstore.google.com']);
 
-export function isBlockedPageUrl(url: string): boolean {
+export function isBlockedPageUrl(url: string, ownExtensionId?: string): boolean {
   let parsed: URL;
   try {
     parsed = new URL(url);
   } catch {
+    return false;
+  }
+  if (
+    parsed.protocol === 'chrome-extension:' &&
+    typeof ownExtensionId === 'string' &&
+    ownExtensionId.length > 0 &&
+    parsed.hostname === ownExtensionId
+  ) {
     return false;
   }
   if (BLOCKED_PROTOCOLS.has(parsed.protocol)) {

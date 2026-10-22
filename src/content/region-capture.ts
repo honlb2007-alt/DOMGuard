@@ -1,18 +1,21 @@
 // Region capture overlay and the clipboard card. The image stays in memory
 // until the card closes. It is not stored and not logged.
 
-import { AUTO_COPY_KEY } from '../shared/config';
+import {
+  COPY_FAILED_NOTE,
+  COPY_UNAVAILABLE_NOTE,
+  READY_TO_COPY_NOTE,
+  copiedToClipboardNote,
+  dataUrlToPngBlob,
+} from '../shared/clipboard';
 import type { CaptureRegionMessage, ExtensionResponse } from '../shared/messages';
 
 const MIN_DRAG_PX = 8;
 const CARD_DISMISS_MS = 4000;
-const BLOCKED_BADGE_NOTE = "DOMGuard can't run on this page. Chrome blocks extensions here.";
-const GENERIC_ERROR = 'Something went wrong. Please try again.';
-const QUOTA_NOTE = 'Daily limit reached';
-const COPIED_NOTE = 'Copied. Press Ctrl+V to paste.';
-const COPY_FAILED_NOTE = "Couldn't copy automatically.";
-const MANUAL_NOTE = 'Screenshot ready.';
-const CROP_NOTE = 'Larger than the visible area. The capture will be cropped.';
+const BLOCKED_BADGE_NOTE = "This page can't be changed. Open a normal website, then try again.";
+const GENERIC_ERROR = "Couldn't capture this area. Try again.";
+const QUOTA_NOTE = 'Daily limit reached. Upgrade to keep capturing today.';
+const CROP_NOTE = 'Part of this size is off-screen. The picture will include only what is visible.';
 
 const SCROLL_KEYS = new Set([
   'ArrowUp',
@@ -45,6 +48,19 @@ let capturing = false;
 let cardHost: HTMLElement | null = null;
 let cardTimer = 0;
 let cardBlob: Blob | null = null;
+/** One successful paste counts once, including a later Copy click. */
+let copyCounted = false;
+let copyGeneration = 0;
+
+interface PendingCopy {
+  resolve: (blob: Blob) => void;
+  reject: (error: Error) => void;
+  done: Promise<boolean>;
+}
+
+let pendingCopy: PendingCopy | null = null;
+/** none: no automatic write was started. unavailable: the page cannot write. */
+let copyAttempt: 'none' | 'started' | 'unavailable' = 'none';
 
 const REGION_CSS = `
   .shade, .bar, .frame, .size, .warn {
@@ -134,38 +150,59 @@ function outputSize(width: number, height: number): string {
   return `${Math.max(0, Math.round(width * ratio))} x ${Math.max(0, Math.round(height * ratio))}`;
 }
 
-function dataUrlToPngBlob(dataUrl: string): Blob {
-  const comma = dataUrl.indexOf(',');
-  if (comma < 0) {
-    throw new Error('CAPTURE_FAILED');
+function noteCopied(): void {
+  if (copyCounted) {
+    return;
   }
-  const payload = dataUrl.slice(comma + 1);
-  const binary = atob(payload);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return new Blob([bytes], { type: 'image/png' });
+  copyCounted = true;
+  void chrome.runtime.sendMessage({ type: 'COUNT_COPIED_SCREENSHOT' });
 }
 
-async function readAutoCopy(): Promise<boolean> {
+/**
+ * Call this in the pointer or key handler, before any await. The blob promise
+ * stays pending until the capture finishes, so the write keeps the gesture.
+ */
+function beginGestureCopy(): void {
+  pendingCopy = null;
+  copyAttempt = 'none';
+  if (!document.hasFocus()) {
+    window.focus();
+  }
+  if (!navigator.clipboard?.write) {
+    copyAttempt = 'unavailable';
+    return;
+  }
+  let resolveBlob!: (blob: Blob) => void;
+  let rejectBlob!: (error: Error) => void;
+  const blobPromise = new Promise<Blob>((resolve, reject) => {
+    resolveBlob = resolve;
+    rejectBlob = reject;
+  });
+  let done: Promise<boolean>;
   try {
-    const stored = await chrome.storage.local.get(AUTO_COPY_KEY);
-    return stored[AUTO_COPY_KEY] !== false;
+    done = navigator.clipboard
+      .write([new ClipboardItem({ 'image/png': blobPromise })])
+      .then(() => true)
+      .catch(() => false);
   } catch {
-    return true;
+    copyAttempt = 'unavailable';
+    return;
   }
+  copyAttempt = 'started';
+  pendingCopy = { resolve: resolveBlob, reject: rejectBlob, done };
 }
 
-async function writeClipboard(blob: Blob): Promise<boolean> {
+function writeBlobNow(blob: Blob): Promise<boolean> {
   try {
     if (!navigator.clipboard?.write) {
-      return false;
+      return Promise.resolve(false);
     }
-    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-    return true;
+    return navigator.clipboard
+      .write([new ClipboardItem({ 'image/png': blob })])
+      .then(() => true)
+      .catch(() => false);
   } catch {
-    return false;
+    return Promise.resolve(false);
   }
 }
 
@@ -177,23 +214,12 @@ function closeCard(): void {
   cardBlob = null;
 }
 
-function saveBlob(blob: Blob): void {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = 'domguard-capture.png';
-  link.hidden = true;
-  document.documentElement.append(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => {
-    URL.revokeObjectURL(url);
-  }, 1000);
-}
-
-function showCard(blob: Blob, dataUrl: string, state: 'copied' | 'failed' | 'manual'): void {
+function showCard(blob: Blob, dataUrl: string, state: 'copied' | 'failed' | 'ready' | 'unavailable'): void {
   closeCard();
   cardBlob = blob;
+  if (state === 'copied') {
+    noteCopied();
+  }
 
   const host = document.createElement('div');
   mountCardHost(host);
@@ -211,12 +237,18 @@ function showCard(blob: Blob, dataUrl: string, state: 'copied' | 'failed' | 'man
   const note = document.createElement('p');
   note.className = 'note';
   note.textContent =
-    state === 'copied' ? COPIED_NOTE : state === 'manual' ? MANUAL_NOTE : COPY_FAILED_NOTE;
+    state === 'copied'
+      ? copiedToClipboardNote(navigator.userAgent)
+      : state === 'ready'
+        ? READY_TO_COPY_NOTE
+        : state === 'unavailable'
+          ? COPY_UNAVAILABLE_NOTE
+          : COPY_FAILED_NOTE;
 
   const actions = document.createElement('div');
   actions.className = 'actions';
 
-  if (state !== 'copied') {
+  if (state === 'failed' || state === 'ready') {
     const copyButton = document.createElement('button');
     copyButton.type = 'button';
     copyButton.textContent = 'Copy';
@@ -225,24 +257,19 @@ function showCard(blob: Blob, dataUrl: string, state: 'copied' | 'failed' | 'man
         return;
       }
       const current = cardBlob;
-      void writeClipboard(current).then((ok) => {
-        if (ok && cardBlob === current) {
-          showCard(current, dataUrl, 'copied');
+      const generation = copyGeneration;
+      if (!document.hasFocus()) {
+        window.focus();
+      }
+      void writeBlobNow(current).then((ok) => {
+        if (generation !== copyGeneration || cardBlob !== current) {
+          return;
         }
+        showCard(current, dataUrl, ok ? 'copied' : 'unavailable');
       });
     });
     actions.append(copyButton);
   }
-
-  const saveButton = document.createElement('button');
-  saveButton.type = 'button';
-  saveButton.textContent = 'Save as file';
-  saveButton.addEventListener('click', (event) => {
-    if (!event.isTrusted || cardBlob === null) {
-      return;
-    }
-    saveBlob(cardBlob);
-  });
 
   const closeButton = document.createElement('button');
   closeButton.type = 'button';
@@ -254,7 +281,7 @@ function showCard(blob: Blob, dataUrl: string, state: 'copied' | 'failed' | 'man
     closeCard();
   });
 
-  actions.append(saveButton, closeButton);
+  actions.append(closeButton);
   card.append(thumb, note, actions);
   shadow.append(style, card);
   document.documentElement.append(host);
@@ -314,14 +341,27 @@ async function deliver(dataUrl: string): Promise<void> {
   try {
     blob = dataUrlToPngBlob(dataUrl);
   } catch {
-    showTextCard(GENERIC_ERROR);
+    failPendingCopy(GENERIC_ERROR);
     return;
   }
-  if (!(await readAutoCopy())) {
-    showCard(blob, dataUrl, 'manual');
+  if (!pendingCopy) {
+    showCard(blob, dataUrl, copyAttempt === 'unavailable' ? 'failed' : 'ready');
     return;
   }
-  showCard(blob, dataUrl, (await writeClipboard(blob)) ? 'copied' : 'failed');
+  const copy = pendingCopy;
+  pendingCopy = null;
+  copy.resolve(blob);
+  showCard(blob, dataUrl, (await copy.done) ? 'copied' : 'failed');
+}
+
+function failPendingCopy(note: string): void {
+  const copy = pendingCopy;
+  pendingCopy = null;
+  if (copy) {
+    copy.reject(new Error('capture'));
+    void copy.done;
+  }
+  showTextCard(note);
 }
 
 async function requestCapture(rect: CssRect): Promise<void> {
@@ -339,22 +379,26 @@ async function requestCapture(rect: CssRect): Promise<void> {
   try {
     response = (await chrome.runtime.sendMessage(message)) as ExtensionResponse;
   } catch {
-    showTextCard(GENERIC_ERROR);
+    failPendingCopy(GENERIC_ERROR);
     return;
   }
   if (!response?.ok || !('dataUrl' in response) || typeof response.dataUrl !== 'string') {
     if (response && !response.ok && response.error === 'QUOTA_EXCEEDED') {
-      showTextCard(QUOTA_NOTE);
+      failPendingCopy(QUOTA_NOTE);
       return;
     }
     if (response && !response.ok && response.error === 'PAGE_BLOCKED') {
-      showTextCard(BLOCKED_BADGE_NOTE);
+      failPendingCopy(BLOCKED_BADGE_NOTE);
       return;
     }
-    showTextCard(GENERIC_ERROR);
+    failPendingCopy(GENERIC_ERROR);
     return;
   }
-  await deliver(response.dataUrl);
+  try {
+    await deliver(response.dataUrl);
+  } catch {
+    failPendingCopy(GENERIC_ERROR);
+  }
 }
 
 function place(element: HTMLElement, x: number, y: number, width: number, height: number): void {
@@ -485,17 +529,27 @@ export function startRegionSelection(custom?: { width: number; height: number })
     }
   }
 
-  function finish(rect: CssRect): void {
+  function finish(rect: CssRect, fromGesture: boolean): void {
     if (done || capturing) {
       return;
     }
     capturing = true;
+    copyCounted = false;
+    copyGeneration += 1;
+    if (fromGesture) {
+      beginGestureCopy();
+    } else {
+      pendingCopy = null;
+      copyAttempt = 'none';
+    }
     teardown();
     void (async () => {
       try {
         await nextFrame();
         await nextFrame();
         await requestCapture(rect);
+      } catch {
+        failPendingCopy(GENERIC_ERROR);
       } finally {
         capturing = false;
       }
@@ -503,7 +557,7 @@ export function startRegionSelection(custom?: { width: number; height: number })
   }
 
   function captureViewport(): void {
-    finish({ x: 0, y: 0, width: window.innerWidth, height: window.innerHeight });
+    finish({ x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }, false);
   }
 
   function onWheel(event: WheelEvent): void {
@@ -549,7 +603,7 @@ export function startRegionSelection(custom?: { width: number; height: number })
     }
     if (!customCss && event.key === 'Enter') {
       event.preventDefault();
-      captureViewport();
+      finish({ x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }, true);
       return;
     }
     if (SCROLL_KEYS.has(event.key)) {
@@ -562,7 +616,7 @@ export function startRegionSelection(custom?: { width: number; height: number })
       return;
     }
     if (customCss) {
-      finish(box);
+      finish(box, true);
       return;
     }
     dragging = true;
@@ -614,7 +668,7 @@ export function startRegionSelection(custom?: { width: number; height: number })
       teardown();
       return;
     }
-    finish(rect);
+    finish(rect, true);
   }
 
   shade.addEventListener('pointerdown', onPointerDown);

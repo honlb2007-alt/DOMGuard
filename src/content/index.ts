@@ -3,7 +3,7 @@
 // content_scripts.
 
 import {
-  detectHiddenText,
+  detectReviewFindings,
   restoreAfterCapture as restoreHiddenText,
   sanitizeBeforeCapture as hideHiddenText,
   sanitizedCount,
@@ -80,7 +80,7 @@ function togglePicker(): ResponseFor<'TOGGLE_PICKER'> {
 }
 
 function reportHiddenText(): ResponseFor<'DETECT_HIDDEN_TEXT'> {
-  const findings = detectHiddenText();
+  const findings = detectReviewFindings();
   showHiddenReview(findings);
   return { ok: true, count: findings.length };
 }
@@ -139,6 +139,7 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
     case 'RESTORE_AFTER_CAPTURE':
       return restoreAfterCapture();
     case 'CAPTURE_SCREENSHOT':
+    case 'COUNT_COPIED_SCREENSHOT':
     case 'CHECK_PRO':
     case 'GET_STATUS':
     case 'OPEN_UPGRADE':
@@ -148,6 +149,7 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
     case 'ADD_PROTECT_EXCEPTION':
     case 'REMOVE_PROTECT_EXCEPTION':
     case 'RESTORE_PROTECT_ALL':
+    case 'NOTE_PROTECT_TRIP':
     case 'CLEAR_AUTO_MASK':
     case 'UPDATE_PROTECT_SETTINGS':
       return { ok: false, error: `${message.type} is handled by the service worker.` };

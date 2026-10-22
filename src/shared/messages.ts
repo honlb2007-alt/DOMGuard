@@ -61,6 +61,11 @@ export interface CaptureRegionMessage {
   devicePixelRatio: number;
 }
 
+/** Count one free screenshot after the picture is on the clipboard. */
+export interface CountCopiedScreenshotMessage {
+  type: 'COUNT_COPIED_SCREENSHOT';
+}
+
 export interface EnableProtectAllMessage {
   type: 'ENABLE_PROTECT_ALL';
 }
@@ -103,6 +108,15 @@ export interface RestoreProtectAllMessage {
   type: 'RESTORE_PROTECT_ALL';
 }
 
+/** Tells the service worker this page tripped the hide breaker. */
+export interface NoteProtectTripMessage {
+  type: 'NOTE_PROTECT_TRIP';
+}
+
+export interface NoteProtectTripResponse {
+  ok: true;
+}
+
 export interface CheckProMessage {
   type: 'CHECK_PRO';
 }
@@ -131,6 +145,7 @@ export type ExtensionMessage =
   | CaptureScreenshotMessage
   | StartRegionCaptureMessage
   | CaptureRegionMessage
+  | CountCopiedScreenshotMessage
   | EnableProtectAllMessage
   | DisableProtectAllMessage
   | GetProtectAllMessage
@@ -139,6 +154,7 @@ export type ExtensionMessage =
   | AddProtectExceptionMessage
   | RemoveProtectExceptionMessage
   | RestoreProtectAllMessage
+  | NoteProtectTripMessage
   | CheckProMessage
   | GetStatusMessage
   | OpenUpgradeMessage;
@@ -209,6 +225,10 @@ export interface CaptureRegionResponse {
   dataUrl: string;
 }
 
+export interface CountCopiedScreenshotResponse {
+  ok: true;
+}
+
 export interface ProtectSettings {
   hideText: boolean;
   maskSensitive: boolean;
@@ -222,7 +242,12 @@ export interface ProtectSettings {
 
 export interface ProtectAllStateResponse {
   ok: true;
+  /** Stored protectAll flag after startup and permission checks. */
   active: boolean;
+  /** Every script that the current sub-options require is registered. */
+  registered: boolean;
+  /** Optional <all_urls> host permission is currently granted. */
+  permissionGranted: boolean;
   disabledHosts: string[];
   settings: ProtectSettings;
 }
@@ -269,6 +294,7 @@ export interface SuccessResponseMap {
   CAPTURE_SCREENSHOT: CaptureScreenshotResponse;
   START_REGION_CAPTURE: StartRegionCaptureResponse;
   CAPTURE_REGION: CaptureRegionResponse;
+  COUNT_COPIED_SCREENSHOT: CountCopiedScreenshotResponse;
   ENABLE_PROTECT_ALL: ProtectAllStateResponse;
   DISABLE_PROTECT_ALL: ProtectAllStateResponse;
   GET_PROTECT_ALL: ProtectAllStateResponse;
@@ -277,6 +303,7 @@ export interface SuccessResponseMap {
   ADD_PROTECT_EXCEPTION: ProtectAllStateResponse;
   REMOVE_PROTECT_EXCEPTION: ProtectAllStateResponse;
   RESTORE_PROTECT_ALL: RestoreProtectAllResponse;
+  NOTE_PROTECT_TRIP: NoteProtectTripResponse;
   CHECK_PRO: CheckProResponse;
   GET_STATUS: GetStatusResponse;
   OPEN_UPGRADE: OpenUpgradeResponse;
@@ -291,6 +318,7 @@ export type ExtensionResponse = ResponseFor<MessageType>;
 export const BACKGROUND_MESSAGE_TYPES = [
   'CAPTURE_SCREENSHOT',
   'CAPTURE_REGION',
+  'COUNT_COPIED_SCREENSHOT',
   'CHECK_PRO',
   'GET_STATUS',
   'OPEN_UPGRADE',
@@ -300,6 +328,7 @@ export const BACKGROUND_MESSAGE_TYPES = [
   'UPDATE_PROTECT_SETTINGS',
   'ADD_PROTECT_EXCEPTION',
   'REMOVE_PROTECT_EXCEPTION',
+  'NOTE_PROTECT_TRIP',
 ] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -390,6 +419,8 @@ export function parseExtensionMessage(raw: unknown): ExtensionMessage | null {
       }
       return { type: 'CAPTURE_REGION', x, y, width, height, innerWidth, innerHeight, devicePixelRatio };
     }
+    case 'COUNT_COPIED_SCREENSHOT':
+      return { type: 'COUNT_COPIED_SCREENSHOT' };
     case 'ENABLE_PROTECT_ALL':
       return { type: 'ENABLE_PROTECT_ALL' };
     case 'DISABLE_PROTECT_ALL':
@@ -424,6 +455,8 @@ export function parseExtensionMessage(raw: unknown): ExtensionMessage | null {
         : null;
     case 'RESTORE_PROTECT_ALL':
       return { type: 'RESTORE_PROTECT_ALL' };
+    case 'NOTE_PROTECT_TRIP':
+      return { type: 'NOTE_PROTECT_TRIP' };
     case 'CHECK_PRO':
       return { type: 'CHECK_PRO' };
     case 'GET_STATUS':

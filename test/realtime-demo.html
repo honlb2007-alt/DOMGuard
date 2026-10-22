@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>DOMGuard real-time hide demo</title>
+  <style>
+    body { margin: 24px; font: 16px/1.4 "Segoe UI", system-ui, sans-serif; color: #101114; background: #f4f1ea; }
+    h1 { font-size: 22px; margin: 0 0 8px; }
+    p { margin: 0 0 12px; }
+    #summary { white-space: pre-wrap; background: #fff; border: 1px solid #d9d3c5; padding: 12px; }
+    .scroll { height: 280px; overflow: auto; background: #fff; border: 1px solid #d9d3c5; margin: 12px 0; }
+    .row { padding: 4px 8px; }
+    .trap-a { padding: 0; margin: 0; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+    .trap-off { position: absolute; left: -5000px; width: 80px; }
+    .trap-b-fade { opacity: 0.04; }
+    .sheet-target { }
+    .chat { transition: background-color 180ms linear; }
+    .chat:hover { background: #efe7d2; }
+    nav.menu { transition: opacity 200ms linear; }
+    .dark { background: #17191e; color: #e8eaef; padding: 8px; }
+    .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+  </style>
+</head>
+<body>
+  <h1>Real-time hide demo</h1>
+  <p>
+    Harmless traps only. Results appear here after the run finishes. Show Hidden Text should list
+    the clipped, transparent, and off-screen traps, including the open-shadow trap, and should
+    leave the readable controls off the list.
+  </p>
+  <div id="summary">Running…</div>
+  <div id="scroll" class="scroll"></div>
+  <div id="view"></div>
+  <div id="stage"></div>
+  <div id="chat"></div>
+  <div id="burst"></div>
+  <script>
+    if (!window.chrome || !chrome.storage || !chrome.storage.local) {
+      const stored = { protectAll: true, protectHideText: true, protectDisabledHosts: [] };
+      window.chrome = {
+        storage: {
+          local: {
+            get: function () { return Promise.resolve(stored); },
+          },
+          onChanged: { addListener: function () {} },
+        },
+        runtime: {
+          id: 'domguard-realtime-demo',
+          sendMessage: function () { return Promise.resolve({ ok: true }); },
+          onMessage: { addListener: function () {} },
+        },
+      };
+    }
+  </script>
+  <script src="../dist-dev/protect-all.js"></script>
+  <script>
+    const TRAP = 'TEST ONLY - case N hidden instruction text for protection testing';
+    const aSamples = [];
+    const bSamples = [];
+    let controlHits = 0;
+    let sheetAtFrame = false;
+    let sheetElement = null;
+
+    function trap(n) {
+      return TRAP.replace('N', String(n));
+    }
+
+    function onScreen(element) {
+      const rect = element.getBoundingClientRect();
+      const top = rect.top;
+      const left = rect.left;
+      return top < window.innerHeight && rect.bottom > 0 && left < window.innerWidth && rect.right > 0;
+    }
+
+    function trackA(element, label) {
+      const visible = onScreen(element);
+      requestAnimationFrame(function () {
+        aSamples.push({
+          label: label,
+          onScreen: visible,
+          hidden: getComputedStyle(element).visibility === 'hidden',
+        });
+      });
+    }
+
+    function trackB(element, label) {
+      const started = performance.now();
+      const tick = function () {
+        if (getComputedStyle(element).visibility === 'hidden') {
+          bSamples.push({ label: label, ms: performance.now() - started });
+          return;
+        }
+        if (performance.now() - started > 1000) {
+          bSamples.push({ label: label, ms: 1000 });
+          return;
+        }
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    }
+
+    function watchControl(element) {
+      const observer = new MutationObserver(function () {
+        if (getComputedStyle(element).visibility === 'hidden') {
+          controlHits += 1;
+        }
+      });
+      observer.observe(element, { attributes: true, attributeFilter: ['style'] });
+    }
+
+    function addControls() {
+      const stage = document.getElementById('stage');
+      const short = document.createElement('span');
+      short.className = 'sr';
+      short.textContent = 'Skip';
+      const labelled = document.createElement('span');
+      labelled.className = 'sr';
+      labelled.setAttribute('aria-label', 'Section');
+      labelled.textContent = trap(9);
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = trap(9);
+      button.style.fontSize = '1px';
+      const menu = document.createElement('nav');
+      menu.className = 'menu';
+      const item = document.createElement('span');
+      item.textContent = 'Open the account menu and choose settings.';
+      menu.append(item);
+      const dark = document.createElement('p');
+      dark.className = 'dark';
+      dark.textContent = 'Dark theme body copy stays readable and must never disappear.';
+      stage.append(short, labelled, button, menu, dark);
+      watchControl(short);
+      watchControl(labelled);
+      watchControl(button);
+      watchControl(item);
+      watchControl(dark);
+    }
+
+    function startScroll() {
+      const scroller = document.getElementById('scroll');
+      let batch = 0;
+      const timer = window.setInterval(function () {
+        if (batch >= 16) {
+          window.clearInterval(timer);
+          return;
+        }
+        const kind = batch % 2 === 0 ? 'A' : 'B';
+        for (let index = 0; index < 30; index += 1) {
+          const row = document.createElement('div');
+          row.className = 'row';
+          row.textContent = 'Visible list row ' + batch + '-' + index + ' for the scrolling feed.';
+          scroller.append(row);
+        }
+        const trapRow = document.createElement('div');
+        trapRow.className = kind === 'A' ? 'row trap-a' : 'row trap-b-fade';
+        trapRow.textContent = trap(kind === 'A' ? 1 : 2);
+        scroller.append(trapRow);
+        scroller.scrollTop = scroller.scrollHeight;
+        if (kind === 'A') {
+          trackA(trapRow, 'scroll');
+        } else {
+          trackB(trapRow, 'scroll');
+        }
+        batch += 1;
+      }, 300);
+    }
+
+    function startChat() {
+      const host = document.getElementById('chat');
+      const rows = [];
+      for (let index = 0; index < 8; index += 1) {
+        const row = document.createElement('div');
+        row.className = 'chat';
+        row.textContent = 'Chat line ' + index + ' stays visible while the pointer hovers.';
+        host.append(row);
+        rows.push(row);
+      }
+      let step = 0;
+      const timer = window.setInterval(function () {
+        if (step >= 6) {
+          window.clearInterval(timer);
+          return;
+        }
+        const row = rows[step];
+        row.className = 'chat trap-b-fade';
+        row.textContent = trap(2);
+        trackB(row, 'chat');
+        window.setTimeout(function () {
+          row.className = 'chat';
+          row.textContent = 'Recycled chat line ' + step + ' is ordinary visible text again.';
+        }, 700);
+        step += 1;
+      }, 900);
+    }
+
+    function startCases() {
+      addControls();
+      startScroll();
+      const stage = document.getElementById('stage');
+      const off = document.createElement('p');
+      off.className = 'trap-off';
+      off.textContent = trap(1);
+      stage.append(off);
+      trackA(off, 'offscreen');
+
+      const switched = document.createElement('p');
+      switched.textContent = trap(5);
+      stage.append(switched);
+      window.setTimeout(function () {
+        switched.className = 'trap-a';
+        trackA(switched, 'class');
+      }, 500);
+
+      const host = document.createElement('div');
+      const shadow = host.attachShadow({ mode: 'open' });
+      stage.append(host);
+      window.setTimeout(function () {
+        const trapNode = document.createElement('p');
+        trapNode.textContent = trap(6);
+        trapNode.style.display = 'block';
+        trapNode.style.width = '0';
+        trapNode.style.height = '0';
+        trapNode.style.overflow = 'hidden';
+        trapNode.style.clipPath = 'inset(50%)';
+        shadow.append(trapNode);
+        trackA(trapNode, 'shadow');
+      }, 700);
+
+      window.setTimeout(function () {
+        const view = document.getElementById('view');
+        view.replaceChildren();
+        const copy = document.createElement('p');
+        copy.textContent = 'The routed view keeps this paragraph on screen.';
+        const trapNode = document.createElement('p');
+        trapNode.className = 'trap-a';
+        trapNode.textContent = trap(3);
+        view.append(copy, trapNode);
+        history.pushState({ page: 2 }, '', '#two');
+        trackA(trapNode, 'route');
+      }, 1000);
+
+      window.setTimeout(function () {
+        const trapNode = document.createElement('p');
+        trapNode.className = 'trap-a';
+        trapNode.textContent = trap(4);
+        stage.append(trapNode);
+        trackA(trapNode, 'delay');
+      }, 2000);
+
+      sheetElement = document.createElement('p');
+      sheetElement.className = 'sheet-target';
+      sheetElement.textContent = trap(8);
+      stage.append(sheetElement);
+      window.setTimeout(function () {
+        const style = document.createElement('style');
+        style.textContent = '.sheet-target { padding: 0; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }';
+        document.head.append(style);
+        requestAnimationFrame(function () {
+          sheetAtFrame = getComputedStyle(sheetElement).visibility === 'hidden';
+        });
+      }, 3200);
+
+      window.setTimeout(startChat, 6500);
+
+      window.setTimeout(function () {
+        const parts = [];
+        for (let index = 0; index < 500; index += 1) {
+          if (index === 5 || index === 40 || index === 480) {
+            parts.push('<div class="trap-a">' + trap(7) + '</div>');
+          } else {
+            parts.push('<div class="row">Ordinary pasted row ' + index + ' stays visible.</div>');
+          }
+        }
+        const burst = document.getElementById('burst');
+        burst.innerHTML = parts.join('');
+        const traps = burst.querySelectorAll('.trap-a');
+        for (const trapNode of traps) {
+          trackA(trapNode, 'burst');
+        }
+      }, 9000);
+
+      window.setTimeout(report, 11500);
+    }
+
+    function percentile(values, pct) {
+      if (values.length === 0) {
+        return 0;
+      }
+      const sorted = values.slice().sort(function (left, right) { return left - right; });
+      const rank = Math.min(sorted.length - 1, Math.max(0, Math.ceil((pct / 100) * sorted.length) - 1));
+      return sorted[rank];
+    }
+
+    function report() {
+      const onScreenA = aSamples.filter(function (sample) { return sample.onScreen; });
+      const hiddenOnScreen = onScreenA.filter(function (sample) { return sample.hidden; });
+      const ratio = onScreenA.length === 0 ? 0 : hiddenOnScreen.length / onScreenA.length;
+      const times = bSamples.map(function (sample) { return sample.ms; });
+      const average = times.length === 0 ? 0 : times.reduce(function (sum, value) { return sum + value; }, 0) / times.length;
+      let hiddenAtEnd = 0;
+      const controlsNow = document.querySelectorAll('#stage .sr, #stage button, #stage nav span, #stage .dark');
+      for (const element of controlsNow) {
+        if (getComputedStyle(element).visibility === 'hidden') {
+          hiddenAtEnd += 1;
+        }
+      }
+      const byLabel = {};
+      for (const sample of aSamples) {
+        const key = sample.label;
+        if (!byLabel[key]) {
+          byLabel[key] = { hidden: 0, total: 0, onScreen: 0 };
+        }
+        byLabel[key].total += 1;
+        if (sample.onScreen) {
+          byLabel[key].onScreen += 1;
+        }
+        if (sample.hidden) {
+          byLabel[key].hidden += 1;
+        }
+      }
+      const lines = [
+        'on-screen A hidden before paint: ' + hiddenOnScreen.length + '/' + onScreenA.length + ' (' + (ratio * 100).toFixed(1) + '%)',
+        'B average ms: ' + average.toFixed(1),
+        'B p95 ms: ' + percentile(times, 95).toFixed(1),
+        'B samples: ' + times.length,
+        'controls ever hidden: ' + Math.max(controlHits, hiddenAtEnd),
+        'stylesheet hidden at first frame: ' + String(sheetAtFrame),
+        'stylesheet hidden at end: ' + String(sheetElement ? getComputedStyle(sheetElement).visibility === 'hidden' : false),
+        'engine: ' + (document.documentElement.getAttribute('data-domguard-dev') || 'missing'),
+      ];
+      for (const key of Object.keys(byLabel)) {
+        const row = byLabel[key];
+        lines.push(key + ' hidden ' + row.hidden + '/' + row.total + ' on-screen ' + row.onScreen);
+      }
+      document.getElementById('summary').textContent = lines.join('\n');
+    }
+
+    window.addEventListener('DOMContentLoaded', function () {
+      window.setTimeout(startCases, 80);
+    });
+  </script>
+</body>
+</html>

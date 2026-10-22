@@ -7,70 +7,95 @@
   <style>
     body {
       margin: 0;
-      background: #f7f5f2;
-      color: #1c1917;
-      font: 17px/1.55 Georgia, "Palatino Linotype", Palatino, serif;
+      background: #e8eaef;
+      color: #101114;
+      font: 17px/1.55 "Segoe UI", system-ui, sans-serif;
     }
     main {
-      max-width: 38rem;
+      max-width: 40rem;
       margin: 0 auto;
-      padding: 3rem 1.25rem 4rem;
+      padding: 48px 24px 64px;
     }
     h1 {
-      margin: 0 0 1.25rem;
-      font-size: 1.75rem;
+      margin: 0 0 24px;
+      font-size: 32px;
       line-height: 1.2;
-      font-weight: 600;
+      font-weight: 650;
     }
     h2 {
-      margin: 1.75rem 0 0.5rem;
-      font-size: 1.05rem;
-      font-weight: 600;
+      margin: 32px 0 8px;
+      font-size: 18px;
+      font-weight: 650;
     }
-    p {
-      margin: 0 0 0.75rem;
+    p, li {
+      margin: 0 0 12px;
     }
     ul {
-      margin: 0 0 0.75rem;
-      padding-left: 1.2rem;
-    }
-    li {
-      margin: 0.35rem 0;
+      margin: 0 0 12px;
+      padding-left: 20px;
     }
     a {
-      color: #1d4e89;
+      color: #101114;
+    }
+    .nav {
+      margin: 0 0 32px;
+    }
+    .nav a {
+      margin-right: 16px;
     }
   </style>
 </head>
 <body>
   <main>
+    <p class="nav">
+      <a href="index.html">DOMGuard</a>
+      <a href="support.html">Support</a>
+    </p>
     <h1>DOMGuard Privacy Policy</h1>
 
     <p>DOMGuard processes page content and screenshots in your browser. It does not upload them to any server.</p>
+    <p>DOMGuard does not save page content. A sensitive-data scan keeps only the type and the position on the page, not the matched text.</p>
 
-    <p>DOMGuard does not save page content or screenshots. A sensitive-data scan keeps only the type and the position on the page, not the matched text.</p>
-    <p>Hidden-text detection shows, in the extension popup, a preview of at most 80 characters of the detected text for each item. Those previews exist only in memory while the popup is open. They disappear when the popup closes. They are not saved, and they are not sent outside the browser.</p>
-    <p>A screenshot is turned into a downloaded file from the popup. It is not written to the extension’s storage.</p>
+    <h2>Optional access to all sites</h2>
+    <p>Access to all websites is optional. DOMGuard asks for it only when you turn on Protect all sites. After that, DOMGuard's content scripts run on pages you visit. They hide hidden text and mask sensitive information on those pages. That work stays in the browser. Page content is not uploaded and is not saved.</p>
+
+    <h2>Hidden text on the page</h2>
+    <p>Show Hidden Text draws a list and outlines on the page. The preview exists only in the page's memory. It disappears when you close the panel. It is not saved, and it is not sent anywhere.</p>
+
+    <h2>Screenshots</h2>
+    <p>When you take a screenshot, the image is written to the system clipboard. DOMGuard does not save the screenshot, and it does not offer a download.</p>
 
     <h2>Payments</h2>
     <p>The only network communication is with ExtensionPay (extensionpay.com). It is used for Pro payment and for checking whether this install is paid. ExtensionPay and Stripe handle the payment. DOMGuard does not handle credit card information.</p>
-    <p>ExtensionPay saves a user record (including email and payment status), an API key, and the install time in the browser’s chrome.storage.sync. This is ExtensionPay’s own behavior. For information about its privacy, see <a href="https://extensionpay.com/">extensionpay.com</a>.</p>
+    <p>ExtensionPay saves a user record (including email and payment status), an API key, and the install time in the browser’s chrome.storage.sync, under extensionpay_user, extensionpay_api_key, and extensionpay_installed_at. This is ExtensionPay’s own behavior. For information about its privacy, see <a href="https://extensionpay.com/">extensionpay.com</a>.</p>
 
     <h2>Saved on this device</h2>
-    <p>DOMGuard saves the day’s free-screenshot count in chrome.storage.local. That record is a date and a count. Pro status is cached in memory only and is not written to disk.</p>
+    <p>DOMGuard writes the following to chrome.storage.local. Pro status is cached in memory only and is not written to disk.</p>
+    <ul>
+      <li>domguardScreenshotQuota — the local date and the count of free screenshots copied that day.</li>
+      <li>maskStyle — solid black or blurred.</li>
+      <li>protectAll — whether Protect all sites is on.</li>
+      <li>protectGrantNeeded — whether Chrome still needs to grant all-sites access.</li>
+      <li>protectHideText — whether hidden text is hidden while Protect all sites is on.</li>
+      <li>autoMask — whether sensitive data is masked automatically.</li>
+      <li>maskApiKeys, maskCards, maskEmails, maskPhones — which kinds of sensitive data are selected. Emails and phone numbers start off.</li>
+      <li>protectDisabledHosts — hostnames of sites you paused.</li>
+      <li>hintProtectSeen, hintCaptureSeen, hintToolsSeen — whether you dismissed the first-use tips.</li>
+    </ul>
 
     <h2>Permissions</h2>
     <ul>
       <li>activeTab — work on the tab where you opened DOMGuard, including a screenshot of the visible area.</li>
-      <li>scripting — inject DOMGuard’s script into that tab.</li>
-      <li>storage — save the day’s free-screenshot count, and let ExtensionPay save its entitlement record.</li>
-      <li>extensionpay.com — reach ExtensionPay for payment and Pro checks.</li>
+      <li>scripting — inject DOMGuard’s script into that tab, and register the Protect all sites scripts after you turn that feature on.</li>
+      <li>storage — save the settings and count listed above, and let ExtensionPay save its entitlement record.</li>
+      <li>extensionpay.com — reach ExtensionPay for payment and Pro checks. A content script runs only on that site.</li>
+      <li>Optional access to all sites — requested only when you turn on Protect all sites, and removed when you turn it off and nothing else needs it.</li>
     </ul>
 
     <h2>Contact</h2>
-    <p>[CONTACT EMAIL]</p>
+    <p><a href="mailto:binlabs.studio@gmail.com">binlabs.studio@gmail.com</a></p>
 
-    <p>Effective date: [DATE]</p>
+    <p>Effective date: October 22, 2026</p>
   </main>
 </body>
 </html>

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Welcome to DOMGuard</title>
+    <link rel="stylesheet" href="./welcome.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="header">
+        <p class="mark">DOMGuard</p>
+        <h1>Welcome. DOMGuard hides secrets and hidden text before a picture leaves the page.</h1>
+      </header>
+
+      <section class="section" aria-labelledby="steps-title">
+        <h2 id="steps-title">Start here</h2>
+        <ol class="steps">
+          <li>
+            <span class="step-name">Pin DOMGuard to the toolbar</span>
+            <span class="step-body">Click the puzzle piece, then pin DOMGuard so it stays one click away.</span>
+          </li>
+          <li>
+            <span class="step-name">Turn on Protect all sites</span>
+            <span class="step-body">Open DOMGuard and turn it on. Allow access when Chrome asks, so new pages stay covered.</span>
+          </li>
+          <li>
+            <span class="step-name">Learn the shortcuts</span>
+            <span class="step-body">The keys below work while Chrome is the front window. Change any of them on Chrome's shortcut page.</span>
+          </li>
+        </ol>
+      </section>
+
+      <section class="section" aria-labelledby="shortcuts-title">
+        <h2 id="shortcuts-title">Keyboard shortcuts</h2>
+        <p class="hint">Each row is an action and the keys that run it. "Not set" means you choose the keys yourself.</p>
+        <table class="keys">
+          <thead>
+            <tr>
+              <th scope="col">Action</th>
+              <th scope="col">Keys</th>
+            </tr>
+          </thead>
+          <tbody id="shortcut-rows">
+            <tr>
+              <td colspan="2">Loading shortcuts…</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="hint">To change a shortcut, open Chrome's shortcut page, find DOMGuard, and type the keys you want. Leave a row empty to clear it.</p>
+        <button id="change-shortcuts" type="button" class="btn">Change shortcuts</button>
+      </section>
+
+      <section class="section" aria-labelledby="try-title">
+        <h2 id="try-title">Try it</h2>
+        <p class="hint">These lines are fake. Nothing here is a real secret. Open DOMGuard on this tab, or use the buttons below.</p>
+        <div class="sample" id="try-sample">
+          <p>API key: sk-DOMGUARDDEMOtestkey123456</p>
+          <p>Email: demo.user@example.com</p>
+          <p>Card: 4242 4242 4242 4242</p>
+        </div>
+        <p class="hint">Auto Scan covers keys and card numbers. Emails stay visible until you turn Emails on in DOMGuard. Manual picker covers whatever line you click.</p>
+        <div class="try-actions">
+          <button id="try-scan" type="button" class="btn btn-primary" aria-describedby="try-status">
+            <span class="btn-label">Auto Scan &amp; Mask</span>
+          </button>
+          <button id="try-picker" type="button" class="btn" aria-describedby="try-status">
+            <span class="btn-label">Manual picker</span>
+          </button>
+        </div>
+        <p id="try-status" class="status" role="status" aria-live="polite" aria-atomic="true">
+          Ready. Choose Auto Scan &amp; Mask, or turn on Manual picker and click a line.
+        </p>
+      </section>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

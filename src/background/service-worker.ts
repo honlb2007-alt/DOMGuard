@@ -4,7 +4,7 @@ import {
   getQuota,
   isPro,
   proAccess,
-  takeFreeScreenshot,
+  consumeScreenshotQuota,
 } from './entitlement';
 import {
   AUTO_MASK_KEY,
@@ -18,6 +18,7 @@ import {
   PROTECT_DISABLED_HOSTS_KEY,
   PROTECT_GRANT_NEEDED_KEY,
   PROTECT_HIDE_TEXT_KEY,
+  BREAKER_BADGE_MS,
   storedBool,
 } from '../content/protect-decision';
 import { cleanScreenshot } from './pixel-clean';
@@ -29,6 +30,7 @@ import {
   type ExtensionMessage,
   type ExtensionResponse,
   type MaskStyle,
+  type ProtectAllStateResponse,
   type ProtectSettings,
   type ProStatusChangedMessage,
   type ResponseFor,
@@ -226,11 +228,10 @@ async function captureScreenshot(): Promise<ResponseFor<'CAPTURE_SCREENSHOT'>> {
     if (await isPro()) {
       return { ok: true, dataUrl: await captureProScreenshot(tab) };
     }
-    const dataUrl = await takeFreeScreenshot(() => capturePlainScreenshot(tab));
-    if (dataUrl === null) {
+    if ((await getQuota()).remaining <= 0) {
       return { ok: false, error: 'QUOTA_EXCEEDED' };
     }
-    return { ok: true, dataUrl };
+    return { ok: true, dataUrl: await capturePlainScreenshot(tab) };
   } catch {
     return { ok: false, error: 'CAPTURE_FAILED' };
   }
@@ -286,17 +287,25 @@ async function captureRegion(
       const full = await captureProScreenshot(tab);
       return { ok: true, dataUrl: await cropScreenshot(full, message) };
     }
-    const dataUrl = await takeFreeScreenshot(async () => {
-      const full = await capturePlainScreenshot(tab);
-      return cropScreenshot(full, message);
-    });
-    if (dataUrl === null) {
+    if ((await getQuota()).remaining <= 0) {
       return { ok: false, error: 'QUOTA_EXCEEDED' };
     }
-    return { ok: true, dataUrl };
+    const full = await capturePlainScreenshot(tab);
+    return { ok: true, dataUrl: await cropScreenshot(full, message) };
   } catch {
     return { ok: false, error: 'CAPTURE_FAILED' };
   }
+}
+
+async function countCopiedScreenshot(): Promise<ResponseFor<'COUNT_COPIED_SCREENSHOT'>> {
+  if (await isPro()) {
+    return { ok: true };
+  }
+  const counted = await consumeScreenshotQuota();
+  if (!counted) {
+    return { ok: false, error: 'QUOTA_EXCEEDED' };
+  }
+  return { ok: true };
 }
 
 async function handleMessage(
@@ -316,6 +325,8 @@ async function handleMessage(
       return forwardToContent(message);
     case 'CAPTURE_SCREENSHOT':
       return captureScreenshot();
+    case 'COUNT_COPIED_SCREENSHOT':
+      return countCopiedScreenshot();
     case 'START_REGION_CAPTURE':
       return beginRegionCapture(message);
     case 'CAPTURE_REGION':
@@ -328,6 +339,9 @@ async function handleMessage(
     case 'GET_PROTECT_ALL':
       await reconcileProtectAll();
       return protectAllState();
+    case 'NOTE_PROTECT_TRIP':
+      await flashBreakerBadge();
+      return { ok: true };
     case 'UPDATE_PROTECT_SETTINGS':
       return updateProtectSettings(message);
     case 'CLEAR_AUTO_MASK':
@@ -442,12 +456,47 @@ async function readSettings(): Promise<ProtectSettings> {
   };
 }
 
-async function protectAllState(): Promise<ResponseFor<'GET_PROTECT_ALL'>> {
+async function hasAllSitesPermission(): Promise<boolean> {
+  try {
+    return await chrome.permissions.contains({ origins: ['<all_urls>'] });
+  } catch {
+    return false;
+  }
+}
+
+async function registeredScriptIds(): Promise<Set<string>> {
+  try {
+    const existing = await chrome.scripting.getRegisteredContentScripts({
+      ids: [PROTECT_ALL_SCRIPT_ID, AUTO_MASK_SCRIPT_ID],
+    });
+    return new Set(existing.map((script) => script.id));
+  } catch {
+    return new Set();
+  }
+}
+
+async function registrationAgrees(settings: ProtectSettings): Promise<boolean> {
+  const have = await registeredScriptIds();
+  const hideOk = settings.hideText
+    ? have.has(PROTECT_ALL_SCRIPT_ID)
+    : !have.has(PROTECT_ALL_SCRIPT_ID);
+  const maskOk = settings.maskSensitive
+    ? have.has(AUTO_MASK_SCRIPT_ID)
+    : !have.has(AUTO_MASK_SCRIPT_ID);
+  return hideOk && maskOk;
+}
+
+async function protectAllState(): Promise<ProtectAllStateResponse> {
+  const settings = await readSettings();
+  const active = await readProtectAll();
+  const expectsScript = settings.hideText || settings.maskSensitive;
   return {
     ok: true,
-    active: await readProtectAll(),
+    active,
+    permissionGranted: await hasAllSitesPermission(),
+    registered: expectsScript && (await registrationAgrees(settings)),
     disabledHosts: await readDisabledHosts(),
-    settings: await readSettings(),
+    settings,
   };
 }
 
@@ -470,17 +519,22 @@ async function maybeDropAllSitesPermission(): Promise<void> {
   }
 }
 
-async function registerScript(id: string, file: string): Promise<void> {
-  const existing = await chrome.scripting.getRegisteredContentScripts({ ids: [id] });
-  if (existing.length > 0) {
-    return;
+async function registerScript(
+  id: string,
+  file: string,
+  runAt: 'document_idle' | 'document_start' = 'document_idle',
+): Promise<void> {
+  try {
+    await chrome.scripting.unregisterContentScripts({ ids: [id] });
+  } catch {
+    // Nothing registered yet. Registering below is the success path.
   }
   await chrome.scripting.registerContentScripts([
     {
       id,
       matches: ['<all_urls>'],
       js: [file],
-      runAt: 'document_idle',
+      runAt,
       persistAcrossSessions: true,
       allFrames: false,
     },
@@ -545,7 +599,7 @@ async function syncProtectScripts(): Promise<void> {
   const active = await readProtectAll();
   const settings = await readSettings();
   if (active && settings.hideText) {
-    await registerScript(PROTECT_ALL_SCRIPT_ID, PROTECT_ALL_FILE);
+    await registerScript(PROTECT_ALL_SCRIPT_ID, PROTECT_ALL_FILE, 'document_start');
     await injectOpenWebTabs(PROTECT_ALL_FILE);
   } else {
     await unregisterScript(PROTECT_ALL_SCRIPT_ID);
@@ -573,6 +627,13 @@ async function disableProtectAll(): Promise<void> {
   await maybeDropAllSitesPermission();
 }
 
+async function clearProtectRegistration(): Promise<void> {
+  await chrome.storage.local.set({ [PROTECT_ALL_KEY]: false });
+  await unregisterScript(PROTECT_ALL_SCRIPT_ID);
+  await unregisterScript(AUTO_MASK_SCRIPT_ID);
+  await writeGlobalProtectBadge('off');
+}
+
 async function enableProtectAll(): Promise<ResponseFor<'ENABLE_PROTECT_ALL'>> {
   const access = await proAccess();
   if (access === 'unavailable') {
@@ -582,6 +643,9 @@ async function enableProtectAll(): Promise<ResponseFor<'ENABLE_PROTECT_ALL'>> {
     await maybeDropAllSitesPermission();
     return { ok: false, error: 'PRO_REQUIRED' };
   }
+  if (!(await hasAllSitesPermission())) {
+    return { ok: false, error: 'PERMISSION_DENIED' };
+  }
   await chrome.storage.local.set({
     [PROTECT_ALL_KEY]: true,
     [PROTECT_GRANT_NEEDED_KEY]: false,
@@ -589,7 +653,12 @@ async function enableProtectAll(): Promise<ResponseFor<'ENABLE_PROTECT_ALL'>> {
   try {
     await syncProtectScripts();
   } catch {
-    await chrome.storage.local.set({ [PROTECT_ALL_KEY]: false });
+    await clearProtectRegistration();
+    return { ok: false, error: 'PROTECT_UNAVAILABLE' };
+  }
+  const state = await protectAllState();
+  if ((state.settings.hideText || state.settings.maskSensitive) && !state.registered) {
+    await clearProtectRegistration();
     return { ok: false, error: 'PROTECT_UNAVAILABLE' };
   }
   await writeGlobalProtectBadge('on');
@@ -629,12 +698,32 @@ async function updateProtectSettings(
  */
 async function reconcileProtectAll(): Promise<void> {
   if (!(await readProtectAll())) {
+    await unregisterScript(PROTECT_ALL_SCRIPT_ID);
+    await unregisterScript(AUTO_MASK_SCRIPT_ID);
     const settings = await readSettings();
     await writeGlobalProtectBadge(settings.grantNeeded ? 'grant' : 'off');
     return;
   }
+  if (!(await hasAllSitesPermission())) {
+    await chrome.storage.local.set({
+      [PROTECT_ALL_KEY]: false,
+      [PROTECT_GRANT_NEEDED_KEY]: false,
+    });
+    await unregisterScript(PROTECT_ALL_SCRIPT_ID);
+    await unregisterScript(AUTO_MASK_SCRIPT_ID);
+    await writeGlobalProtectBadge('off');
+    return;
+  }
   const access = await proAccess();
   if (access === 'unavailable') {
+    const settings = await readSettings();
+    if (!(await registrationAgrees(settings))) {
+      try {
+        await syncProtectScripts();
+      } catch {
+        // Leave protectAll set so the next startup can retry after the network returns.
+      }
+    }
     await writeGlobalProtectBadge('on');
     return;
   }
@@ -642,10 +731,14 @@ async function reconcileProtectAll(): Promise<void> {
     await disableProtectAll();
     return;
   }
-  try {
-    await syncProtectScripts();
-  } catch {
-    // The optional host permission may have been removed outside the popup.
+  const settings = await readSettings();
+  if (!(await registrationAgrees(settings))) {
+    try {
+      await syncProtectScripts();
+    } catch {
+      await clearProtectRegistration();
+      return;
+    }
   }
   await maybeDropAllSitesPermission();
   await writeGlobalProtectBadge((await permissionStillNeeded()) ? 'on' : 'off');
@@ -709,6 +802,27 @@ async function flashUnpaidBadge(): Promise<void> {
 
 async function flashBlockedBadge(): Promise<void> {
   await flashToolbarBadge('!');
+}
+
+let breakerBadgeTimer = 0;
+
+/** Page-local breaker. The badge is temporary; protection on other pages stays on. */
+async function flashBreakerBadge(): Promise<void> {
+  if (breakerBadgeTimer) {
+    clearTimeout(breakerBadgeTimer);
+    breakerBadgeTimer = 0;
+  }
+  try {
+    await chrome.action.setBadgeText({ text: '!' });
+    await chrome.action.setBadgeBackgroundColor({ color: PROTECT_BADGE_BACKGROUND });
+    await chrome.action.setBadgeTextColor({ color: PROTECT_BADGE_TEXT });
+  } catch {
+    return;
+  }
+  breakerBadgeTimer = self.setTimeout(() => {
+    breakerBadgeTimer = 0;
+    void restoreProtectBadge();
+  }, BREAKER_BADGE_MS);
 }
 
 async function beginRegionCapture(
@@ -791,8 +905,12 @@ chrome.runtime.onStartup.addListener(() => {
   void reconcileProtectAll();
 });
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((details) => {
   void reconcileProtectAll();
+  if (details.reason !== 'install') {
+    return;
+  }
+  void chrome.tabs.create({ url: chrome.runtime.getURL('src/welcome/index.html') });
 });
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {

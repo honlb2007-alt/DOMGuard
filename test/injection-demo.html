@@ -193,5 +193,50 @@
       <code>sk-FAKE0000testkey0000testkey0000testkey0000testk</code>.
     </p>
     <p>Backup contact 0912-345-678, secondary mailbox qa+domguard@example.org.</p>
+
+    <h2>Show Hidden Text checks</h2>
+    <p id="review-note"></p>
+    <div id="shadow-host"></div>
+    <p id="added-traps"></p>
+    <p>
+      <button id="remove-case-4" type="button">Remove case 4</button>
+      <button id="add-trap" type="button">Add an off-screen line</button>
+    </p>
+    <script>
+      const reviewNote = document.getElementById('review-note');
+      if (reviewNote) {
+        reviewNote.textContent =
+          'Show Hidden Text should list cases 1 to 5, the instruction line, and the open-shadow clip. Readable controls stay off the list. Reveal changes only the row you choose. Close or Escape restores it. Refresh, or waiting about a second, picks up the buttons below. Clicking a removed row says the element is no longer on the page.';
+      }
+      const shadowHost = document.getElementById('shadow-host');
+      if (shadowHost) {
+        const shadow = shadowHost.attachShadow({ mode: 'open' });
+        const trap = document.createElement('p');
+        trap.textContent = 'TEST ONLY - shadow hidden instruction text for review testing';
+        trap.style.width = '1px';
+        trap.style.height = '1px';
+        trap.style.overflow = 'hidden';
+        trap.style.clipPath = 'inset(50%)';
+        shadow.append(trap);
+      }
+      const removeCase = document.getElementById('remove-case-4');
+      if (removeCase) {
+        removeCase.addEventListener('click', () => {
+          document.querySelector('.case-4')?.remove();
+        });
+      }
+      const addTrap = document.getElementById('add-trap');
+      if (addTrap) {
+        addTrap.addEventListener('click', () => {
+          const line = document.createElement('p');
+          line.className = 'case-4';
+          line.textContent = 'TEST ONLY - added off-screen hidden instruction demo';
+          const slot = document.getElementById('added-traps');
+          if (slot) {
+            slot.append(line);
+          }
+        });
+      }
+    </script>
   </body>
 </html>

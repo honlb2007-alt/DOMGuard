@@ -5,6 +5,8 @@ import {
   ALL_SITES_MIN_TEXT_LENGTH,
   judgeBackground,
   normalizeStoredHostname,
+  CONFIRM_FOLLOW_UP_MS,
+  planHideRecheck,
   protectAllThrottleMs,
   shouldProtectHide,
   shouldRunOnHost,
@@ -184,18 +186,60 @@ describe('advanceHideConfirmation', () => {
   });
 });
 
-describe('shouldTripProtect', () => {
-  const calm = { elapsedMs: 1000, hiddenElements: 1, hiddenChars: 40, maxFlipsOnOneElement: 0 };
+describe('planHideRecheck', () => {
+  it('asks for another look while a candidate is moving or not yet confirmed', () => {
+    expect(CONFIRM_FOLLOW_UP_MS).toBeGreaterThanOrEqual(400);
+    expect(CONFIRM_FOLLOW_UP_MS).toBeLessThanOrEqual(600);
+    expect(planHideRecheck({ hasFinding: false, inMotion: false, confirmed: false })).toBe('clear');
+    expect(planHideRecheck({ hasFinding: true, inMotion: false, confirmed: false })).toBe('recheck');
+    expect(planHideRecheck({ hasFinding: true, inMotion: true, confirmed: false })).toBe('recheck');
+    expect(planHideRecheck({ hasFinding: true, inMotion: true, confirmed: true })).toBe('recheck');
+    expect(planHideRecheck({ hasFinding: true, inMotion: false, confirmed: true })).toBe('hide');
+  });
+});
 
-  it('trips on too many elements, too much text, or repeated flipping', () => {
-    expect(shouldTripProtect({ ...calm, hiddenElements: 26 })).toBe(true);
-    expect(shouldTripProtect({ ...calm, hiddenChars: 2001 })).toBe(true);
-    expect(shouldTripProtect({ ...calm, maxFlipsOnOneElement: 3 })).toBe(true);
+describe('shouldTripProtect', () => {
+  const now = 20_000;
+  const calm = {
+    now,
+    hides: [{ at: now - 1000, chars: 40 }] as { at: number; chars: number }[],
+    flips: [] as { at: number; key: number }[],
+  };
+
+  it('trips on too many elements, too much text, or repeated flipping inside the window', () => {
+    const hides = Array.from({ length: 26 }, () => ({ at: now - 500, chars: 40 }));
+    expect(shouldTripProtect({ ...calm, hides })).toBe(true);
+    expect(shouldTripProtect({ ...calm, hides: [{ at: now - 100, chars: 2001 }] })).toBe(true);
+    expect(
+      shouldTripProtect({
+        ...calm,
+        flips: [
+          { at: now - 300, key: 7 },
+          { at: now - 200, key: 7 },
+          { at: now - 100, key: 7 },
+        ],
+      }),
+    ).toBe(true);
   });
 
-  it('stops watching after the opening window', () => {
-    expect(shouldTripProtect({ ...calm, elapsedMs: 5001, hiddenElements: 40, hiddenChars: 9000 })).toBe(
-      false,
-    );
+  it('ignores marks older than the rolling window, including a late burst that has gone quiet', () => {
+    expect(
+      shouldTripProtect({
+        now,
+        hides: Array.from({ length: 40 }, () => ({ at: now - 5001, chars: 80 })),
+        flips: [
+          { at: now - 9000, key: 1 },
+          { at: now - 8000, key: 1 },
+          { at: now - 7000, key: 1 },
+        ],
+      }),
+    ).toBe(false);
+    expect(
+      shouldTripProtect({
+        now: 10_000,
+        hides: Array.from({ length: 26 }, () => ({ at: 9500, chars: 40 })),
+        flips: [],
+      }),
+    ).toBe(true);
   });
 });

@@ -47,6 +47,86 @@ body {
   gap: 8px;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.with-shortcut,
+.shortcut-slot,
+.tip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.with-shortcut .btn {
+  flex: 1;
+  width: auto;
+}
+
+.shortcut-slot {
+  flex: none;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
+  max-width: 112px;
+  text-align: right;
+}
+
+.kbd,
+.shortcut-key {
+  color: var(--paper);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.text-link {
+  border: 0;
+  background: transparent;
+  color: var(--brass);
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.text-link:focus-visible,
+.shortcuts-fold summary:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 2px;
+}
+
+.tip {
+  align-items: flex-start;
+  justify-content: space-between;
+  color: var(--paper);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.shortcuts-fold {
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+
+.shortcuts-fold summary {
+  cursor: pointer;
+  color: var(--paper);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.shortcuts-fold summary + * {
+  margin-top: 8px;
+}
+
 .section,
 .upgrade,
 .shot-actions,
@@ -211,11 +291,6 @@ h1 {
 
 .shot-actions .btn-primary {
   flex: 1;
-}
-
-.shot-actions #copy-screenshot {
-  flex: 0 0 auto;
-  min-width: 80px;
 }
 
 .field {

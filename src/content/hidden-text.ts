@@ -10,12 +10,24 @@
 
 import { parseColor, type Rgba } from './contrast';
 import {
+  parseStoredReason,
+  PROTECT_REASON_ATTR,
+  reviewReason,
+} from './hidden-review-plan';
+import {
   contrastOn,
   judgeBackground,
   shouldProtectHide,
   type BackgroundJudgement,
   type BackgroundLayer,
 } from './protect-decision';
+import {
+  classifyCandidate,
+  CONTRAST_HIDE_BELOW,
+  isFullyClippedCss,
+  SHADOW_DEPTH_LIMIT,
+  type CandidateFacts,
+} from './protect-realtime';
 import type { HiddenReason } from '../shared/messages';
 
 /** Same marker the masker sets. Duplicated so this file does not pull in the scanner. */
@@ -415,6 +427,193 @@ export function detectHiddenText(options?: HiddenTextOptions): HiddenFinding[] {
   return classifyElements(collectTextElements(document.body, Number.POSITIVE_INFINITY), options);
 }
 
+const REVIEW_INTERACTIVE = 'button, a, input, select, textarea, label, summary';
+
+const REVIEW_CHROME =
+  'nav, menu, dialog, [role="menu"], [role="dialog"], [role="tooltip"], [role="navigation"]';
+
+function parentAcross(element: Element): Element | null {
+  if (element.parentElement) {
+    return element.parentElement;
+  }
+  const root = element.getRootNode();
+  return root instanceof ShadowRoot ? root.host : null;
+}
+
+function reviewHasAria(element: Element): boolean {
+  for (const attribute of element.attributes) {
+    if (attribute.name.startsWith('aria-')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function reviewEditable(element: Element): boolean {
+  let current: Element | null = element;
+  while (current) {
+    if (current.hasAttribute('contenteditable')) {
+      const value = current.getAttribute('contenteditable');
+      if (value?.toLowerCase() !== 'false') {
+        return true;
+      }
+    }
+    if (current === document.documentElement) {
+      break;
+    }
+    current = parentAcross(current);
+  }
+  return false;
+}
+
+/** Text owners in the light tree and in open shadow trees, up to the protect depth. */
+export function collectReviewElements(root: Element): Element[] {
+  const found: Element[] = [];
+  const stack: Array<{ element: Element; depth: number }> = [];
+  for (let index = root.children.length - 1; index >= 0; index -= 1) {
+    stack.push({ element: root.children[index], depth: 0 });
+  }
+  while (stack.length > 0) {
+    const item = stack.pop();
+    if (!item || item.element.tagName === 'IFRAME' || SKIPPED_TAGS.has(item.element.tagName)) {
+      continue;
+    }
+    const { element, depth } = item;
+    if (!element.closest(GUARD_SELECTOR) && ownText(element).length > 0) {
+      found.push(element);
+    }
+    const shadow = element.shadowRoot;
+    if (shadow && depth < SHADOW_DEPTH_LIMIT) {
+      for (let index = shadow.children.length - 1; index >= 0; index -= 1) {
+        stack.push({ element: shadow.children[index], depth: depth + 1 });
+      }
+    }
+    for (let index = element.children.length - 1; index >= 0; index -= 1) {
+      const child = element.children[index];
+      if (child.tagName !== 'IFRAME') {
+        stack.push({ element: child, depth });
+      }
+    }
+  }
+  return found;
+}
+
+function reviewBackground(
+  element: Element,
+  styles: Map<Element, CSSStyleDeclaration>,
+): BackgroundJudgement {
+  const layers: BackgroundLayer[] = [];
+  let current: Element | null = element;
+  while (current) {
+    const style = styleOf(current, styles);
+    layers.push({
+      backgroundColor: style.backgroundColor,
+      backgroundImage: style.backgroundImage,
+      backdropFilter: style.getPropertyValue('backdrop-filter') || 'none',
+      onCanvas: current === document.body || current === document.documentElement,
+    });
+    if (current === document.documentElement) {
+      break;
+    }
+    current = parentAcross(current);
+  }
+  const scheme = styleOf(document.documentElement, styles).getPropertyValue('color-scheme');
+  return judgeBackground(layers, scheme);
+}
+
+function reviewOpacity(element: Element, styles: Map<Element, CSSStyleDeclaration>): number {
+  let opacity = 1;
+  let current: Element | null = element;
+  while (current) {
+    const value = Number.parseFloat(styleOf(current, styles).opacity);
+    if (Number.isFinite(value)) {
+      opacity *= value;
+    }
+    if (current === document.documentElement) {
+      break;
+    }
+    current = parentAcross(current);
+  }
+  return opacity;
+}
+
+/**
+ * Same judgement as Protect all sites. When Protect has already hidden a node,
+ * the stored reason is used so visibility:hidden is not reported instead.
+ */
+export function detectReviewFindings(): HiddenFinding[] {
+  if (!document.body) {
+    return [];
+  }
+  const elements = collectReviewElements(document.body);
+  const styles = new Map<Element, CSSStyleDeclaration>();
+  const viewportWidth = window.innerWidth;
+  const findings: HiddenFinding[] = [];
+  for (const element of elements) {
+    let current: Element | null = element;
+    while (current) {
+      styleOf(current, styles);
+      if (current === document.documentElement) {
+        break;
+      }
+      current = parentAcross(current);
+    }
+    const style = styleOf(element, styles);
+    const rect = element.getBoundingClientRect();
+    const background = reviewBackground(element, styles);
+    const textColor = parseColor(style.color);
+    const opacity = reviewOpacity(element, styles);
+    const lowContrast = Boolean(
+      textColor &&
+        background.reliable &&
+        background.color &&
+        contrastOn(textColor, background.color, opacity) < CONTRAST_HIDE_BELOW,
+    );
+    const facts: CandidateFacts = {
+      text: ownText(element),
+      interactive: element.closest(REVIEW_INTERACTIVE) !== null,
+      insideChrome: element.closest(REVIEW_CHROME) !== null,
+      hasRole: element.hasAttribute('role'),
+      hasAria: reviewHasAria(element),
+      hasTabIndex: element.hasAttribute('tabindex'),
+      contentEditable: reviewEditable(element),
+      display: style.display,
+      fontSizePx: Number.parseFloat(style.fontSize),
+      fullyClipped: isFullyClippedCss(style.clip, style.clipPath),
+      width: rect.width,
+      height: rect.height,
+      overflowHidden: style.overflowX !== 'visible' || style.overflowY !== 'visible',
+      rectLeft: rect.left,
+      rectRight: rect.right,
+      viewportWidth,
+      textIndentPx: Number.parseFloat(style.textIndent),
+      lowContrast,
+      backgroundReliable: background.reliable,
+      opacity,
+      textAlpha: textColor ? textColor.a : null,
+    };
+    const detected = classifyCandidate(facts).reason;
+    const inlineHidden = canHide(element) && element.style.getPropertyValue('visibility') === 'hidden';
+    const stored = inlineHidden ? parseStoredReason(element.getAttribute(PROTECT_REASON_ATTR)) : null;
+    const reason = reviewReason(stored, detected);
+    if (!reason) {
+      continue;
+    }
+    const text = ownText(element);
+    findings.push({
+      element,
+      preview: toPreview(text),
+      reason,
+      textLength: text.length,
+      backgroundSource: background.source,
+      textColor: colourText(textColor),
+      backgroundColor: colourText(background.color),
+      classPath: classPath(element),
+    });
+  }
+  return findings;
+}
+
 /**
  * Hide every hidden-text element so it cannot reach a screenshot. Returns how
  * many elements were hidden.
@@ -469,6 +668,28 @@ function releaseElement(element: HTMLElement | SVGElement): void {
 
 export function isProtectHeld(element: Element): boolean {
   return canHide(element) && sanitized.has(element);
+}
+
+/** Own text only. Child elements are classified on their own. */
+export function elementOwnText(element: Element): string {
+  return ownText(element);
+}
+
+/** True when a later render removed the visibility this extension applied. */
+export function protectInlineCleared(element: Element): boolean {
+  if (!canHide(element) || !sanitized.has(element)) {
+    return false;
+  }
+  return element.style.getPropertyValue('visibility') !== 'hidden';
+}
+
+/** Put the hide back without replacing the saved original inline value. */
+export function reinforceProtectHide(element: Element): boolean {
+  if (!canHide(element) || !sanitized.has(element)) {
+    return false;
+  }
+  element.style.setProperty('visibility', 'hidden', 'important');
+  return true;
 }
 
 /** Hide one element Protect Mode has already confirmed. Returns false if it was already held. */

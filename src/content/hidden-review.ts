@@ -2,11 +2,23 @@
 // when the panel closes. It is not stored, logged, or sent anywhere.
 
 import type { HiddenFinding } from './hidden-text';
+import { detectReviewFindings } from './hidden-text';
+import {
+  capList,
+  nextBoxFrame,
+  PROTECT_REVEAL_ATTR,
+  REMOVED_ELEMENT_NOTE,
+  revealPropertyNames,
+  REVIEW_LIST_LABEL,
+  REVIEW_LIST_LIMIT,
+  REVIEW_REFRESH_MS,
+  REVIEW_REGION_LABEL,
+  shouldScheduleRefresh,
+} from './hidden-review-plan';
 import { ensureReviewRoot, removeReviewRoot } from './masker';
 import { looksLikeAiInstruction } from '../shared/instruction';
 import type { HiddenReason } from '../shared/messages';
 
-const LIST_LIMIT = 100;
 const TEXT_LIMIT = 500;
 const FLASH_MS = 1200;
 
@@ -19,12 +31,6 @@ const REASON_LABELS: Record<HiddenReason, string> = {
   offscreen: 'Off-screen',
   clipped: 'Clipped',
 };
-
-const REVEAL_REASONS: ReadonlySet<HiddenReason> = new Set([
-  'low_contrast',
-  'tiny_font',
-  'transparent',
-]);
 
 const REVIEW_CSS = `
   .review {
@@ -77,6 +83,7 @@ const REVIEW_CSS = `
   }
   .head {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 8px;
   }
@@ -92,19 +99,22 @@ const REVIEW_CSS = `
     color: inherit;
   }
   .head button,
-  .item {
+  .item,
+  .reveal-one {
     border: 1px solid #101114;
     background: #ffffff;
     border-radius: 4px;
     cursor: pointer;
   }
-  .head button {
+  .head button,
+  .reveal-one {
     padding: 2px 8px;
   }
-  .reveal {
-    display: flex;
-    align-items: center;
-    gap: 6px;
+  .reveal-one[aria-pressed='true'] {
+    background: #f5e6a8;
+  }
+  .status:empty {
+    display: none;
   }
   .list {
     display: flex;
@@ -113,6 +123,12 @@ const REVIEW_CSS = `
     margin: 0;
     padding: 0;
     list-style: none;
+  }
+  .entry {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
   }
   .item {
     display: block;
@@ -168,16 +184,22 @@ interface ReviewRow {
   reason: HiddenReason;
   visible: boolean;
   box: HTMLDivElement | null;
+  revealed: boolean;
+  saved: SavedReveal['props'] | null;
+  revealButton: HTMLButtonElement | null;
 }
 
 interface ReviewSession {
   rows: ReviewRow[];
-  saved: SavedReveal[];
   revealed: boolean;
   onKey: (event: KeyboardEvent) => void;
   onScroll: () => void;
   onHide: () => void;
   flashTimer: number;
+  frame: number;
+  refreshTimer: number;
+  observer: MutationObserver | null;
+  scan: readonly HiddenFinding[];
 }
 
 let session: ReviewSession | null = null;
@@ -241,45 +263,93 @@ function drawBoxes(rows: readonly ReviewRow[]): void {
   }
 }
 
+function syncRevealed(current: ReviewSession): void {
+  current.revealed = current.rows.some((row) => row.revealed);
+}
+
+function restoreRow(row: ReviewRow): void {
+  const element = stylable(row.element);
+  if (element && row.saved) {
+    for (const prop of row.saved) {
+      writeProp(element, prop.name, prop.saved);
+    }
+    element.removeAttribute(PROTECT_REVEAL_ATTR);
+  }
+  row.saved = null;
+  row.revealed = false;
+  if (row.revealButton) {
+    row.revealButton.textContent = 'Reveal';
+    row.revealButton.setAttribute('aria-pressed', 'false');
+  }
+}
+
 function restoreReveal(current: ReviewSession): void {
-  for (const entry of current.saved) {
-    for (const prop of entry.props) {
-      writeProp(entry.element, prop.name, prop.saved);
+  for (const row of current.rows) {
+    if (row.revealed) {
+      restoreRow(row);
     }
   }
-  current.saved = [];
   current.revealed = false;
 }
 
-function applyReveal(current: ReviewSession): void {
-  if (current.revealed) {
-    return;
-  }
-  for (const row of current.rows) {
-    if (!REVEAL_REASONS.has(row.reason)) {
-      continue;
-    }
-    const element = stylable(row.element);
-    if (!element) {
-      continue;
-    }
-    const props: SavedReveal['props'] = [
-      { name: 'color', saved: readProp(element, 'color') },
-      { name: 'background-color', saved: readProp(element, 'background-color') },
-    ];
+function paintReadable(element: HTMLElement | SVGElement, reason: HiddenReason): void {
+  const names = revealPropertyNames(reason);
+  element.style.setProperty('visibility', 'visible', 'important');
+  if (names.includes('color')) {
     element.style.setProperty('color', '#101114', 'important');
     element.style.setProperty('background-color', '#F5E6A8', 'important');
-    if (row.reason === 'tiny_font') {
-      props.push({ name: 'font-size', saved: readProp(element, 'font-size') });
-      element.style.setProperty('font-size', '16px', 'important');
-    }
-    if (row.reason === 'transparent') {
-      props.push({ name: 'opacity', saved: readProp(element, 'opacity') });
-      element.style.setProperty('opacity', '1', 'important');
-    }
-    current.saved.push({ element, props });
   }
-  current.revealed = true;
+  if (names.includes('font-size')) {
+    element.style.setProperty('font-size', '16px', 'important');
+  }
+  if (names.includes('opacity')) {
+    element.style.setProperty('opacity', '1', 'important');
+  }
+  if (names.includes('clip')) {
+    element.style.setProperty('clip', 'auto', 'important');
+    element.style.setProperty('clip-path', 'none', 'important');
+    element.style.setProperty('overflow', 'visible', 'important');
+  }
+  if (names.includes('width')) {
+    element.style.setProperty('width', 'auto', 'important');
+    element.style.setProperty('height', 'auto', 'important');
+    element.style.setProperty('overflow', 'visible', 'important');
+    element.style.setProperty('min-width', '8rem', 'important');
+    element.style.setProperty('min-height', '1.2em', 'important');
+  }
+  if (names.includes('position')) {
+    element.style.setProperty('position', 'static', 'important');
+    element.style.setProperty('left', 'auto', 'important');
+    element.style.setProperty('top', 'auto', 'important');
+    element.style.setProperty('text-indent', '0', 'important');
+  }
+}
+
+function revealRow(current: ReviewSession, row: ReviewRow, status: HTMLElement): void {
+  for (const other of current.rows) {
+    if (other !== row && other.revealed) {
+      restoreRow(other);
+    }
+  }
+  const element = stylable(row.element);
+  if (!element || !element.isConnected) {
+    status.textContent = REMOVED_ELEMENT_NOTE;
+    return;
+  }
+  const props: SavedReveal['props'] = revealPropertyNames(row.reason).map((name) => ({
+    name,
+    saved: readProp(element, name),
+  }));
+  element.setAttribute(PROTECT_REVEAL_ATTR, '');
+  paintReadable(element, row.reason);
+  row.saved = props;
+  row.revealed = true;
+  syncRevealed(current);
+  if (row.revealButton) {
+    row.revealButton.textContent = 'Restore';
+    row.revealButton.setAttribute('aria-pressed', 'true');
+  }
+  status.textContent = '';
   drawBoxes(current.rows);
 }
 
@@ -291,6 +361,11 @@ export function dismissHiddenReview(): void {
     return;
   }
   window.clearTimeout(current.flashTimer);
+  window.clearTimeout(current.refreshTimer);
+  if (current.frame) {
+    window.cancelAnimationFrame(current.frame);
+  }
+  current.observer?.disconnect();
   restoreReveal(current);
   window.removeEventListener('keydown', current.onKey, true);
   window.removeEventListener('scroll', current.onScroll, true);
@@ -336,8 +411,9 @@ export function showHiddenReview(findings: readonly HiddenFinding[]): void {
       return a.left - b.left;
     });
 
-  const shown = ranked.slice(0, LIST_LIMIT);
-  const extra = ranked.length - shown.length;
+  const capped = capList(ranked, REVIEW_LIST_LIMIT);
+  const shown = capped.shown;
+  const extra = capped.extra;
 
   const root = ensureReviewRoot();
   const style = document.createElement('style');
@@ -348,30 +424,37 @@ export function showHiddenReview(findings: readonly HiddenFinding[]): void {
 
   const panel = document.createElement('aside');
   panel.className = 'panel';
+  panel.setAttribute('role', 'region');
+  panel.setAttribute('aria-label', REVIEW_REGION_LABEL);
 
   const head = document.createElement('div');
   head.className = 'head';
   const title = document.createElement('p');
   title.className = 'title';
   title.textContent = 'Hidden text';
+  const refreshButton = document.createElement('button');
+  refreshButton.type = 'button';
+  refreshButton.textContent = 'Refresh';
   const collapseButton = document.createElement('button');
   collapseButton.type = 'button';
   collapseButton.textContent = 'Collapse';
+  collapseButton.setAttribute('aria-expanded', 'true');
+  collapseButton.setAttribute('aria-controls', 'domguard-hidden-list');
   const closeButton = document.createElement('button');
   closeButton.type = 'button';
   closeButton.textContent = 'Close';
-  head.append(title, collapseButton, closeButton);
+  closeButton.setAttribute('aria-label', 'Close hidden text');
+  head.append(title, refreshButton, collapseButton, closeButton);
 
-  const revealLabel = document.createElement('label');
-  revealLabel.className = 'reveal';
-  const revealInput = document.createElement('input');
-  revealInput.type = 'checkbox';
-  const revealText = document.createElement('span');
-  revealText.textContent = 'Reveal';
-  revealLabel.append(revealInput, revealText);
+  const status = document.createElement('p');
+  status.className = 'status';
+  status.setAttribute('role', 'status');
+  status.setAttribute('aria-live', 'polite');
 
   const list = document.createElement('ul');
   list.className = 'list';
+  list.id = 'domguard-hidden-list';
+  list.setAttribute('aria-label', REVIEW_LIST_LABEL);
 
   const rows: ReviewRow[] = [];
   const buttons = new Map<HTMLButtonElement, ReviewRow>();
@@ -382,19 +465,21 @@ export function showHiddenReview(findings: readonly HiddenFinding[]): void {
       reason: item.reason,
       visible: item.visible,
       box: null,
+      revealed: false,
+      saved: null,
+      revealButton: null,
     };
-    if (item.visible) {
-      const box = document.createElement('div');
-      box.className = 'box';
-      const tag = document.createElement('span');
-      tag.className = 'tag';
-      tag.textContent = REASON_LABELS[item.reason];
-      box.append(tag);
-      boxes.append(box);
-      row.box = box;
-    }
+    const box = document.createElement('div');
+    box.className = 'box';
+    const tag = document.createElement('span');
+    tag.className = 'tag';
+    tag.textContent = REASON_LABELS[item.reason];
+    box.append(tag);
+    boxes.append(box);
+    row.box = box;
 
     const entry = document.createElement('li');
+    entry.className = 'entry';
     const button = document.createElement('button');
     button.type = 'button';
     button.className = item.flagged ? 'item flagged' : 'item';
@@ -427,12 +512,14 @@ export function showHiddenReview(findings: readonly HiddenFinding[]): void {
         return;
       }
       const target = buttons.get(button);
-      if (!target) {
+      if (!target || !target.box) {
         return;
       }
-      if (!target.visible || !target.box) {
+      if (!target.element.isConnected) {
+        status.textContent = REMOVED_ELEMENT_NOTE;
         return;
       }
+      status.textContent = '';
       target.element.scrollIntoView({ block: 'center', inline: 'nearest' });
       requestAnimationFrame(() => {
         if (!session || target.box === null) {
@@ -443,13 +530,34 @@ export function showHiddenReview(findings: readonly HiddenFinding[]): void {
       });
     });
 
+    const revealButton = document.createElement('button');
+    revealButton.type = 'button';
+    revealButton.className = 'reveal-one';
+    revealButton.textContent = 'Reveal';
+    revealButton.setAttribute('aria-pressed', 'false');
+    revealButton.setAttribute('aria-label', `Reveal ${REASON_LABELS[item.reason]}`);
+    row.revealButton = revealButton;
+    revealButton.addEventListener('click', (event) => {
+      if (!event.isTrusted || !session) {
+        return;
+      }
+      if (row.revealed) {
+        restoreRow(row);
+        syncRevealed(session);
+        status.textContent = '';
+        drawBoxes(session.rows);
+        return;
+      }
+      revealRow(session, row, status);
+    });
+
     buttons.set(button, row);
-    entry.append(button);
+    entry.append(button, revealButton);
     list.append(entry);
     rows.push(row);
   }
 
-  panel.append(head, revealLabel, list);
+  panel.append(head, status, list);
   if (shown.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'more';
@@ -468,9 +576,12 @@ export function showHiddenReview(findings: readonly HiddenFinding[]): void {
 
   const current: ReviewSession = {
     rows,
-    saved: [],
     revealed: false,
     flashTimer: 0,
+    frame: 0,
+    refreshTimer: 0,
+    observer: null,
+    scan: findings,
     onKey: (event) => {
       if (!event.isTrusted || event.key !== 'Escape') {
         return;
@@ -479,9 +590,18 @@ export function showHiddenReview(findings: readonly HiddenFinding[]): void {
       dismissHiddenReview();
     },
     onScroll: () => {
-      if (session) {
-        drawBoxes(session.rows);
+      if (!session) {
+        return;
       }
+      session.frame = nextBoxFrame(session.frame, () =>
+        window.requestAnimationFrame(() => {
+          if (!session) {
+            return;
+          }
+          session.frame = 0;
+          drawBoxes(session.rows);
+        }),
+      );
     },
     onHide: () => {
       dismissHiddenReview();
@@ -495,13 +615,13 @@ export function showHiddenReview(findings: readonly HiddenFinding[]): void {
     }
     const collapsed = !list.hidden;
     list.hidden = collapsed;
-    revealLabel.hidden = collapsed;
-    for (const extra of panel.querySelectorAll('.more')) {
-      if (extra instanceof HTMLElement) {
-        extra.hidden = collapsed;
+    for (const extraNode of panel.querySelectorAll('.more')) {
+      if (extraNode instanceof HTMLElement) {
+        extraNode.hidden = collapsed;
       }
     }
     collapseButton.textContent = collapsed ? 'Expand' : 'Collapse';
+    collapseButton.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
   });
   closeButton.addEventListener('click', (event) => {
     if (!event.isTrusted) {
@@ -509,17 +629,49 @@ export function showHiddenReview(findings: readonly HiddenFinding[]): void {
     }
     dismissHiddenReview();
   });
-  revealInput.addEventListener('change', (event) => {
-    if (!event.isTrusted || !session) {
+  refreshButton.addEventListener('click', (event) => {
+    if (!event.isTrusted) {
       return;
     }
-    if (revealInput.checked) {
-      applyReveal(session);
-      return;
-    }
-    restoreReveal(session);
-    drawBoxes(session.rows);
+    showHiddenReview(detectReviewFindings());
   });
+
+  const observer = new MutationObserver(() => {
+    if (!session || !shouldScheduleRefresh(session.revealed, session.refreshTimer !== 0)) {
+      return;
+    }
+    session.refreshTimer = window.setTimeout(() => {
+      if (!session || session.revealed) {
+        if (session) {
+          session.refreshTimer = 0;
+        }
+        return;
+      }
+      const next = detectReviewFindings();
+      const previous = session.scan;
+      const unchanged =
+        previous.length === next.length &&
+        previous.every(
+          (item, index) =>
+            item.element === next[index].element &&
+            item.reason === next[index].reason &&
+            item.textLength === next[index].textLength,
+        );
+      if (unchanged) {
+        session.refreshTimer = 0;
+        return;
+      }
+      showHiddenReview(next);
+    }, REVIEW_REFRESH_MS);
+  });
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+    attributes: true,
+    attributeFilter: ['style', 'class', 'hidden'],
+  });
+  current.observer = observer;
 
   window.addEventListener('keydown', current.onKey, true);
   window.addEventListener('scroll', current.onScroll, true);

@@ -6,29 +6,38 @@ import {
   type ExtensionMessage,
   type ExtensionResponse,
   type MaskStyle,
+  type ProtectAllStateResponse,
 } from '../shared/messages';
-import { AUTO_COPY_KEY } from '../shared/config';
-import { isBlockedPageUrl } from './page-access';
-import { normalizeStoredHostname } from '../content/protect-decision';
+import { HINT_CAPTURE_SEEN_KEY, HINT_PROTECT_SEEN_KEY, HINT_TOOLS_SEEN_KEY } from '../shared/config';
+import { hintStillNeeded } from '../shared/hints';
 import {
-  downloadHeldCapture,
-  reduceCaptureHold,
-  statusAfterClipboardFailure,
-  type CaptureHold,
-} from './saved-capture';
+  SHORTCUT_NOT_SET,
+  ariaKeyshortcuts,
+  commandActionLabel,
+  formatCommandShortcut,
+  listedCommands,
+  orderedShortcutCommands,
+  shortcutPlatform,
+  type ShortcutCommand,
+} from '../shared/shortcuts';
+import {
+  copyFailureNote,
+  copiedToClipboardNote,
+  dataUrlToPngBlob,
+} from '../shared/clipboard';
+import { isBlockedPageUrl } from './page-access';
+import { normalizeStoredHostname, shouldRunOnHost } from '../content/protect-decision';
 
 const PICKER_LABEL = 'Manual picker';
 const SCAN_LABEL = 'Auto Scan & Mask';
 const HIDDEN_TEXT_LABEL = 'Show Hidden Text';
 const SCREENSHOT_LABEL = 'Capture visible area';
-const SCREENSHOT_LIMIT_LABEL = 'Daily limit reached';
-const COPY_LABEL = 'Copy';
-const COPIED_LABEL = 'Copied';
-const DOWNLOAD_LABEL = 'Download';
-const COPIED_VISIBLE_MS = 1600;
-const GENERIC_ERROR = 'Something went wrong. Please try again.';
-const PAGE_BLOCKED = "DOMGuard can't run on this page. Chrome blocks extensions here.";
-const CLEANUP_NOTE = 'Hidden-text cleanup is a Pro feature';
+const GENERIC_ERROR = 'Something went wrong. Try again in a moment.';
+const PAGE_BLOCKED = "This page can't be changed. Open a normal website, then try again.";
+const CLEANUP_NOTE = 'Hidden-text cleanup is a Pro feature. Upgrade to include it.';
+const LOADING_STATUS = 'Loading…';
+const READY_STATUS = 'Ready.';
+const CAPTURE_LIMIT_STATUS = 'Daily limit reached. Upgrade to keep capturing today.';
 
 const planBadge = document.getElementById('plan-badge');
 const quotaLine = document.getElementById('quota-line');
@@ -46,14 +55,10 @@ let upgradeDismissed = false;
 let upgradeTrigger: HTMLElement | null = null;
 let cleanupNoteShown = false;
 let screenshotBusy = false;
+/** How many clipboard writes failed during this popup. */
+let popupCopyFailures = 0;
 /** Chrome will not inject into this tab. ActiveTab supplied the URL. */
 let pageBlocked = false;
-/** Holds the Copy button on "Copied" until the timer clears it. */
-let copyLabelOverride: string | null = null;
-let copyResetTimer = 0;
-/** Last successful screenshot. Lives only until the next capture or popup close. */
-let heldCapture: CaptureHold = null;
-let popupClosed = false;
 
 function setStatus(text: string): void {
   if (statusEl) {
@@ -164,7 +169,9 @@ function renderPlan(): void {
     quotaLine.textContent = paid
       ? 'Unlimited screenshots'
       : unpaid
-        ? `${remaining} of ${limit} safe screenshots left today`
+        ? remaining <= 0
+          ? `0 of ${limit} safe screenshots left today. Upgrade to keep capturing.`
+          : `${remaining} of ${limit} safe screenshots left today`
         : 'Checking plan…';
   }
 
@@ -184,38 +191,21 @@ function renderPlan(): void {
     protectMark.hidden = !unpaid;
   }
 
-  const exhausted = unpaid && remaining <= 0;
   const screenshotButton = button('capture-screenshot');
   if (screenshotButton) {
-    screenshotButton.disabled = screenshotBusy || exhausted;
+    screenshotButton.disabled = screenshotBusy;
     screenshotButton.setAttribute('aria-busy', screenshotBusy ? 'true' : 'false');
-    labelOf(screenshotButton).textContent = screenshotBusy
-      ? 'Capturing…'
-      : exhausted
-        ? SCREENSHOT_LIMIT_LABEL
-        : SCREENSHOT_LABEL;
-  }
-  const copyButton = button('copy-screenshot');
-  if (copyButton) {
-    copyButton.disabled = screenshotBusy || exhausted;
-    labelOf(copyButton).textContent = copyLabelOverride ?? COPY_LABEL;
+    labelOf(screenshotButton).textContent = screenshotBusy ? 'Capturing…' : SCREENSHOT_LABEL;
   }
   const areaButton = button('capture-area');
   if (areaButton) {
-    areaButton.disabled = screenshotBusy || exhausted;
+    areaButton.disabled = screenshotBusy;
   }
   const customButton = button('capture-custom-size');
   if (customButton) {
-    customButton.disabled = screenshotBusy || exhausted;
+    customButton.disabled = screenshotBusy;
   }
-  setSizeInputsDisabled(screenshotBusy || exhausted);
-  const downloadButton = button('download-capture');
-  if (downloadButton) {
-    const saved = downloadHeldCapture(heldCapture);
-    downloadButton.hidden = saved.dataUrl === null;
-    downloadButton.disabled = screenshotBusy || saved.dataUrl === null;
-    labelOf(downloadButton).textContent = DOWNLOAD_LABEL;
-  }
+  setSizeInputsDisabled(screenshotBusy);
 
   if (paid && upgradePanel instanceof HTMLElement) {
     upgradePanel.hidden = true;
@@ -237,7 +227,6 @@ const INJECTION_CONTROL_IDS = [
   'toggle-picker',
   'detect-hidden-text',
   'capture-screenshot',
-  'copy-screenshot',
   'capture-area',
   'capture-custom-size',
 ];
@@ -293,12 +282,26 @@ function tally(counts: Record<string, number>): string {
 
 function describeScan(response: ExtensionResponse & { ok: true }): string {
   if (!('byType' in response)) {
-    return 'Scan finished.';
+    return 'Scan finished. Check the page for covers.';
   }
   if (response.count === 0) {
-    return 'No sensitive data found.';
+    return 'No sensitive data found. Nothing was covered.';
   }
-  return `Found ${response.count} match(es): ${tally(response.byType)}`;
+  const noun = response.count === 1 ? 'item' : 'items';
+  return `Covered ${response.count} ${noun}: ${tally(response.byType)}.`;
+}
+
+function freeCaptureLocked(): boolean {
+  return knownPaid === false && remaining <= 0;
+}
+
+function offerUpgradeForLimit(target: HTMLElement): boolean {
+  if (!freeCaptureLocked()) {
+    return false;
+  }
+  openUpgrade(target);
+  setStatus(CAPTURE_LIMIT_STATUS);
+  return true;
 }
 
 /**
@@ -335,101 +338,6 @@ async function send(
   }
 }
 
-function screenshotFilename(now: Date): string {
-  const pad = (value: number) => String(value).padStart(2, '0');
-  const date = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
-  const time = `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-  return `domguard-${date}-${time}.png`;
-}
-
-function downloadDataUrl(dataUrl: string, filename: string): void {
-  const link = document.createElement('a');
-  link.href = dataUrl;
-  link.download = filename;
-  document.body.append(link);
-  link.click();
-  link.remove();
-}
-
-function dataUrlToPngBlob(dataUrl: string): Blob {
-  const marker = ';base64,';
-  const splitAt = dataUrl.indexOf(marker);
-  if (!dataUrl.startsWith('data:image/png') || splitAt === -1) {
-    throw new Error('Screenshot was not a PNG.');
-  }
-  const binary = atob(dataUrl.slice(splitAt + marker.length));
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return new Blob([bytes], { type: 'image/png' });
-}
-
-function showCopied(target: HTMLButtonElement): void {
-  copyLabelOverride = COPIED_LABEL;
-  labelOf(target).textContent = COPIED_LABEL;
-  window.clearTimeout(copyResetTimer);
-  copyResetTimer = window.setTimeout(() => {
-    copyLabelOverride = null;
-    copyResetTimer = 0;
-    renderPlan();
-  }, COPIED_VISIBLE_MS);
-}
-
-function dropHeldCapture(): void {
-  heldCapture = reduceCaptureHold(heldCapture, { type: 'screenshot-started' });
-}
-
-function keepCapture(dataUrl: string): void {
-  if (popupClosed) {
-    heldCapture = reduceCaptureHold(heldCapture, { type: 'popup-closed' });
-    return;
-  }
-  heldCapture = reduceCaptureHold(heldCapture, { type: 'screenshot-succeeded', dataUrl });
-}
-
-async function captureSafeScreenshot(target: HTMLButtonElement): Promise<void> {
-  if (target.disabled) {
-    return;
-  }
-  const wasUnpaid = knownPaid === false;
-  dropHeldCapture();
-  screenshotBusy = true;
-  renderPlan();
-  setStatus('Capturing the visible area…');
-  try {
-    const response = await sendToBackground({ type: 'CAPTURE_SCREENSHOT' });
-    if (isUpgradeError(response)) {
-      openUpgrade(target);
-      await refreshEntitlement();
-      return;
-    }
-    if (!response.ok || !response.dataUrl) {
-      heldCapture = reduceCaptureHold(heldCapture, { type: 'screenshot-failed' });
-      setStatus(GENERIC_ERROR);
-      return;
-    }
-    keepCapture(response.dataUrl);
-    const saved = downloadHeldCapture(heldCapture);
-    if (!saved.dataUrl) {
-      setStatus(GENERIC_ERROR);
-      return;
-    }
-    downloadDataUrl(saved.dataUrl, screenshotFilename(new Date()));
-    setStatus('Screenshot downloaded.');
-    await refreshEntitlement();
-    if (wasUnpaid && knownPaid === false) {
-      revealCleanupNote();
-    }
-  } catch {
-    heldCapture = reduceCaptureHold(heldCapture, { type: 'screenshot-failed' });
-    setStatus(GENERIC_ERROR);
-  } finally {
-    screenshotBusy = false;
-    renderPlan();
-  }
-}
-
 async function scanHiddenText(target: HTMLButtonElement): Promise<void> {
   // GET_STATUS already said unpaid, so show the upgrade panel instead of asking again.
   if (knownPaid === false) {
@@ -453,7 +361,9 @@ async function scanHiddenText(target: HTMLButtonElement): Promise<void> {
       return;
     }
     setStatus(
-      response.count === 0 ? 'No hidden text found' : 'Hidden text is marked on the page.',
+      response.count === 0
+        ? 'No hidden text found on this page.'
+        : 'Hidden text is marked on the page. Look for the highlights.',
     );
   } catch {
     setStatus(GENERIC_ERROR);
@@ -488,12 +398,18 @@ async function scanAndMask(target: HTMLButtonElement): Promise<void> {
 }
 
 const scanButton = button('scan-and-mask');
-scanButton?.addEventListener('click', () => {
+scanButton?.addEventListener('click', (event) => {
+  if (!event.isTrusted) {
+    return;
+  }
   void scanAndMask(scanButton);
 });
 
 const hiddenTextButton = button('detect-hidden-text');
-hiddenTextButton?.addEventListener('click', () => {
+hiddenTextButton?.addEventListener('click', (event) => {
+  if (!event.isTrusted) {
+    return;
+  }
   void scanHiddenText(hiddenTextButton);
 });
 
@@ -514,76 +430,80 @@ function readCustomPixels(): { width: number; height: number } | null {
   return { width, height };
 }
 
-async function startAreaCapture(custom?: { width: number; height: number }): Promise<void> {
+async function startAreaCapture(
+  target: HTMLButtonElement,
+  custom?: { width: number; height: number },
+): Promise<void> {
+  if (offerUpgradeForLimit(target)) {
+    return;
+  }
   if (pageBlocked) {
     setStatus(PAGE_BLOCKED);
     return;
   }
-  const response = await sendToBackground(
-    custom
-      ? { type: 'START_REGION_CAPTURE', width: custom.width, height: custom.height }
-      : { type: 'START_REGION_CAPTURE' },
-  );
-  if (!response.ok && response.error === 'PAGE_BLOCKED') {
-    setStatus(PAGE_BLOCKED);
-    return;
+  const label = labelOf(target);
+  const resting = label.textContent ?? '';
+  target.disabled = true;
+  target.setAttribute('aria-busy', 'true');
+  label.textContent = 'Opening…';
+  setStatus('Opening the capture tool…');
+  try {
+    const response = await sendToBackground(
+      custom
+        ? { type: 'START_REGION_CAPTURE', width: custom.width, height: custom.height }
+        : { type: 'START_REGION_CAPTURE' },
+    );
+    if (!response.ok && response.error === 'PAGE_BLOCKED') {
+      setStatus(PAGE_BLOCKED);
+      return;
+    }
+    if (!response.ok) {
+      setStatus(GENERIC_ERROR);
+      return;
+    }
+    setStatus(
+      custom
+        ? 'Click the page to capture this size. Press Esc to cancel.'
+        : 'Drag on the page to choose an area. Press Esc to cancel.',
+    );
+  } finally {
+    target.disabled = false;
+    target.setAttribute('aria-busy', 'false');
+    label.textContent = resting;
+    renderPlan();
   }
-  if (!response.ok) {
-    setStatus(GENERIC_ERROR);
-    return;
-  }
-  setStatus(custom ? 'Click the page to capture this size.' : 'Drag to capture an area.');
 }
 
 const areaButton = button('capture-area');
-areaButton?.addEventListener('click', () => {
-  if (areaButton.disabled) {
+areaButton?.addEventListener('click', (event) => {
+  if (!event.isTrusted || areaButton.disabled) {
     return;
   }
-  void startAreaCapture();
+  void startAreaCapture(areaButton);
 });
 
 const customSizeButton = button('capture-custom-size');
-customSizeButton?.addEventListener('click', () => {
-  if (customSizeButton.disabled) {
+customSizeButton?.addEventListener('click', (event) => {
+  if (!event.isTrusted || customSizeButton.disabled) {
+    return;
+  }
+  if (offerUpgradeForLimit(customSizeButton)) {
     return;
   }
   const size = readCustomPixels();
   if (!size) {
-    setStatus('Enter a width and height from 16 to 8000.');
+    setStatus('Enter a width and height from 16 to 8000, then try again.');
     return;
   }
-  void startAreaCapture(size);
+  void startAreaCapture(customSizeButton, size);
 });
 
-const autoCopyInput = document.getElementById('auto-copy');
-if (autoCopyInput instanceof HTMLInputElement) {
-  autoCopyInput.addEventListener('change', (event) => {
-    if (!event.isTrusted) {
-      return;
-    }
-    void chrome.storage.local.set({ [AUTO_COPY_KEY]: autoCopyInput.checked });
-  });
-}
-
-const screenshotButton = button('capture-screenshot');
-screenshotButton?.addEventListener('click', () => {
-  void captureSafeScreenshot(screenshotButton);
-});
-
-const copyButton = button('copy-screenshot');
-copyButton?.addEventListener('click', () => {
-  if (copyButton.disabled || screenshotBusy) {
-    return;
-  }
-  // write() has to be called in this click, before any await. Passing the PNG
-  // as a promise keeps the user activation alive until the capture finishes,
-  // so the popup does not need the clipboardWrite permission.
+/**
+ * Start the clipboard write in this click, before any await. The PNG promise
+ * resolves after the capture, so the gesture is not lost to captureVisibleTab.
+ */
+function copyVisibleFromGesture(target: HTMLButtonElement): void {
   const wasUnpaid = knownPaid === false;
-  copyLabelOverride = null;
-  window.clearTimeout(copyResetTimer);
-  copyResetTimer = 0;
-  dropHeldCapture();
   screenshotBusy = true;
   renderPlan();
   setStatus('Capturing the visible area…');
@@ -599,40 +519,53 @@ copyButton?.addEventListener('click', () => {
       shotFailed = 'capture';
       throw new Error('capture');
     }
-    keepCapture(response.dataUrl);
-    const saved = downloadHeldCapture(heldCapture);
-    if (!saved.dataUrl) {
-      shotFailed = 'capture';
-      throw new Error('capture');
-    }
-    return dataUrlToPngBlob(saved.dataUrl);
+    return dataUrlToPngBlob(response.dataUrl);
   })();
 
-  const writePromise = navigator.clipboard.write([
-    new ClipboardItem({ 'image/png': pngPromise }),
-  ]);
+  let writePromise: Promise<void> | null = null;
+  try {
+    if (!navigator.clipboard?.write) {
+      throw new Error('clipboard');
+    }
+    writePromise = navigator.clipboard.write([new ClipboardItem({ 'image/png': pngPromise })]);
+  } catch {
+    writePromise = null;
+  }
 
   void (async () => {
     try {
+      if (!writePromise) {
+        await pngPromise.catch(() => undefined);
+        if (shotFailed === 'upgrade') {
+          openUpgrade(target);
+          await refreshEntitlement();
+          return;
+        }
+        if (shotFailed === 'capture') {
+          setStatus(GENERIC_ERROR);
+          return;
+        }
+        popupCopyFailures += 1;
+        setStatus(copyFailureNote(popupCopyFailures));
+        return;
+      }
       await writePromise;
-      heldCapture = reduceCaptureHold(heldCapture, { type: 'copy-succeeded' });
-      showCopied(copyButton);
-      setStatus('Copied.');
+      popupCopyFailures = 0;
+      setStatus(copiedToClipboardNote(navigator.userAgent));
+      await sendToBackground({ type: 'COUNT_COPIED_SCREENSHOT' });
       await refreshEntitlement();
       if (wasUnpaid && knownPaid === false) {
         revealCleanupNote();
       }
     } catch {
       if (shotFailed === 'upgrade') {
-        heldCapture = reduceCaptureHold(heldCapture, { type: 'screenshot-failed' });
-        openUpgrade(copyButton);
+        openUpgrade(target);
         await refreshEntitlement();
       } else if (shotFailed === 'capture') {
-        heldCapture = reduceCaptureHold(heldCapture, { type: 'screenshot-failed' });
         setStatus(GENERIC_ERROR);
       } else {
-        heldCapture = reduceCaptureHold(heldCapture, { type: 'copy-failed' });
-        setStatus(statusAfterClipboardFailure(heldCapture) ?? GENERIC_ERROR);
+        popupCopyFailures += 1;
+        setStatus(copyFailureNote(popupCopyFailures));
         await refreshEntitlement();
       }
     } finally {
@@ -640,42 +573,46 @@ copyButton?.addEventListener('click', () => {
       renderPlan();
     }
   })();
-});
+}
 
-const downloadButton = button('download-capture');
-downloadButton?.addEventListener('click', () => {
-  const saved = downloadHeldCapture(heldCapture);
-  if (!saved.dataUrl || downloadButton.disabled || screenshotBusy) {
+const screenshotButton = button('capture-screenshot');
+screenshotButton?.addEventListener('click', (event) => {
+  if (!event.isTrusted || screenshotButton.disabled) {
     return;
   }
-  downloadDataUrl(saved.dataUrl, screenshotFilename(new Date()));
-  setStatus('Screenshot downloaded.');
-});
-
-window.addEventListener('pagehide', () => {
-  popupClosed = true;
-  heldCapture = reduceCaptureHold(heldCapture, { type: 'popup-closed' });
+  if (offerUpgradeForLimit(screenshotButton)) {
+    return;
+  }
+  copyVisibleFromGesture(screenshotButton);
 });
 
 const clearButton = button('clear-masks');
-clearButton?.addEventListener('click', () => {
+clearButton?.addEventListener('click', (event) => {
+  if (!event.isTrusted) {
+    return;
+  }
   void (async () => {
     const response = await send({ type: 'CLEAR_MASKS' }, clearButton);
     if (response.ok) {
       setPickerLabel(false);
-      setStatus('Masks cleared.');
+      setStatus('Masks cleared. The page text is visible again.');
     }
   })();
 });
 
-pickerButton?.addEventListener('click', () => {
-  if (!(pickerButton instanceof HTMLButtonElement)) {
+pickerButton?.addEventListener('click', (event) => {
+  if (!event.isTrusted || !(pickerButton instanceof HTMLButtonElement)) {
     return;
   }
   void (async () => {
     const response = await send({ type: 'TOGGLE_PICKER' }, pickerButton);
     if (response.ok && 'active' in response) {
       setPickerLabel(response.active);
+      setStatus(
+        response.active
+          ? 'Manual picker is on. Click the text you want to cover.'
+          : 'Manual picker is off.',
+      );
     }
   })();
 });
@@ -683,9 +620,15 @@ pickerButton?.addEventListener('click', () => {
 if (styleSelect instanceof HTMLSelectElement) {
   styleSelect.addEventListener('change', () => {
     void (async () => {
-      const response = await send({ type: 'UPDATE_MASK_STYLE', style: selectedStyle() });
-      if (response.ok) {
-        setStatus('Mask style updated.');
+      styleSelect.setAttribute('aria-busy', 'true');
+      setStatus('Saving mask style…');
+      try {
+        const response = await send({ type: 'UPDATE_MASK_STYLE', style: selectedStyle() });
+        if (response.ok) {
+          setStatus('Mask style saved. New masks will use it.');
+        }
+      } finally {
+        styleSelect.setAttribute('aria-busy', 'false');
       }
     })();
   });
@@ -736,10 +679,18 @@ const protectInput = document.getElementById('protect-all');
 const protectSiteControls = document.getElementById('protect-site-controls');
 const protectExceptionInput = document.getElementById('protect-disable-site');
 const protectExceptionList = document.getElementById('protect-exceptions');
-const PERMISSION_DENIED = 'Permission not granted. Protect all sites stays off.';
+const PERMISSION_DENIED = "Protect all sites stayed off. Allow access when Chrome asks, then turn it on again.";
+const PROTECT_SCRIPT_FAILED = "Couldn't turn on Protect all sites. Turn it off, then on again.";
+const PROTECT_PRO_ONLY = 'Protect all sites is part of Pro. Upgrade to turn it on.';
+const PROTECT_ON_SITE = 'On. Hiding hidden text as pages load and change.';
+const PROTECT_PAUSED = 'Paused on this site.';
+const PROTECT_PAGE_BLOCKED = "Can't run on this page. Chrome blocks extensions here.";
 const GRANT_NEEDED = 'Protect all sites needs permission. Turn it on here to allow access.';
-const PRO_UNVERIFIED = 'Could not verify Pro. Protect all sites stays off.';
+const PRO_UNVERIFIED = "Couldn't confirm Pro just now. Check your connection, then try again.";
 const HOST_UNAVAILABLE = 'This page did not share its address. Open the site, then try again.';
+const PROTECT_OFF = 'Protect all sites is off. Turn it on when you want coverage again.';
+const PROTECT_SAVED = 'Protection settings saved.';
+const PROTECT_TURN_OFF_FAILED = "Couldn't turn off Protect all sites. Try again.";
 let protectBusy = false;
 let activeHostname: string | null = null;
 
@@ -821,7 +772,96 @@ function optionsFromDom(): {
   };
 }
 
+function protectShown(response: ProtectAllStateResponse): boolean {
+  if (!response.active) {
+    return false;
+  }
+  const expects = response.settings.hideText || response.settings.maskSensitive;
+  if (!expects) {
+    return true;
+  }
+  return response.permissionGranted && response.registered;
+}
+
+function paintProtectState(active: boolean, hosts: readonly string[]): void {
+  const line = document.getElementById('protect-state');
+  if (!(line instanceof HTMLElement)) {
+    return;
+  }
+  if (pageBlocked) {
+    line.hidden = false;
+    line.textContent = PROTECT_PAGE_BLOCKED;
+    return;
+  }
+  if (!active) {
+    line.textContent = '';
+    line.hidden = true;
+    return;
+  }
+  if (activeHostname !== null && !shouldRunOnHost(activeHostname, hosts)) {
+    line.hidden = false;
+    line.textContent = PROTECT_PAUSED;
+    return;
+  }
+  if (optionBox('protect-hide-text')?.checked === false) {
+    line.textContent = '';
+    line.hidden = true;
+    return;
+  }
+  line.hidden = false;
+  line.textContent = PROTECT_ON_SITE;
+}
+
+function paintDevProtect(response: ProtectAllStateResponse | null): void {
+  if (!import.meta.env.DEV) {
+    return;
+  }
+  const footer = document.querySelector('.footer');
+  if (!footer) {
+    return;
+  }
+  let line = document.getElementById('dev-protect-status');
+  if (!(line instanceof HTMLElement)) {
+    line = document.createElement('p');
+    line.id = 'dev-protect-status';
+    line.className = 'hint';
+    footer.append(line);
+  }
+  const yes = (value: boolean): string => (value ? 'yes' : 'no');
+  line.textContent = `permission granted? ${yes(response?.permissionGranted === true)} | script registered? ${yes(response?.registered === true)} | pro? ${yes(knownPaid === true)} | protectAll? ${yes(response?.active === true)}`;
+  void readEngineDevLine().then((engine) => {
+    let engineLine = document.getElementById('dev-protect-engine');
+    if (!(engineLine instanceof HTMLElement)) {
+      engineLine = document.createElement('p');
+      engineLine.id = 'dev-protect-engine';
+      engineLine.className = 'hint';
+      footer.append(engineLine);
+    }
+    engineLine.textContent = engine || 'engine: waiting for a page';
+  });
+}
+
+async function readEngineDevLine(): Promise<string> {
+  if (!import.meta.env.DEV) {
+    return '';
+  }
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id === undefined) {
+      return '';
+    }
+    const [injected] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => document.documentElement?.getAttribute('data-domguard-dev') ?? '',
+    });
+    return typeof injected?.result === 'string' ? injected.result : '';
+  } catch {
+    return '';
+  }
+}
+
 function renderExceptions(active: boolean, hosts: readonly string[]): void {
+  paintProtectState(active, hosts);
   if (protectSiteControls instanceof HTMLElement) {
     protectSiteControls.hidden = !active;
   }
@@ -834,6 +874,13 @@ function renderExceptions(active: boolean, hosts: readonly string[]): void {
     return;
   }
   protectExceptionList.replaceChildren();
+  if (hosts.length === 0) {
+    const empty = document.createElement('li');
+    empty.className = 'hint';
+    empty.textContent = 'No sites are paused.';
+    protectExceptionList.append(empty);
+    return;
+  }
   for (const host of hosts) {
     const item = document.createElement('li');
     item.className = 'protect-exception-row';
@@ -843,6 +890,7 @@ function renderExceptions(active: boolean, hosts: readonly string[]): void {
     remove.type = 'button';
     remove.className = 'btn';
     remove.textContent = 'Remove';
+    remove.setAttribute('aria-label', `Remove ${host}`);
     remove.addEventListener('click', () => {
       void sendException('REMOVE_PROTECT_EXCEPTION', host);
     });
@@ -895,15 +943,23 @@ async function refreshProtect(): Promise<boolean> {
     if (!response.ok) {
       input.checked = false;
       renderExceptions(false, []);
+      paintDevProtect(null);
       return false;
     }
-    input.checked = response.active;
-    renderExceptions(response.active, response.disabledHosts);
-    paintProtectOptions(response.active, response.settings);
+    const shown = protectShown(response);
+    input.checked = shown;
+    renderExceptions(shown, response.disabledHosts);
+    paintProtectOptions(shown, response.settings);
+    paintDevProtect(response);
+    const expects = response.settings.hideText || response.settings.maskSensitive;
+    if (!shown && response.active && expects && !response.settings.grantNeeded && !pageBlocked) {
+      setStatus(response.permissionGranted ? PROTECT_SCRIPT_FAILED : PERMISSION_DENIED);
+    }
     return response.settings.grantNeeded;
   } catch {
     input.checked = false;
     renderExceptions(false, []);
+    paintDevProtect(null);
     return false;
   }
 }
@@ -912,16 +968,28 @@ async function sendException(
   type: 'ADD_PROTECT_EXCEPTION' | 'REMOVE_PROTECT_EXCEPTION',
   host: string,
 ): Promise<void> {
+  const exception = exceptionToggle();
+  exception?.setAttribute('aria-busy', 'true');
+  setStatus('Saving this site…');
   try {
     const response = await sendToBackground({ type, host });
     if (!response.ok) {
       setStatus(GENERIC_ERROR);
       return;
     }
-    renderExceptions(response.active, response.disabledHosts);
-    paintProtectOptions(response.active, response.settings);
+    const shown = protectShown(response);
+    const master = protectToggle();
+    if (master) {
+      master.checked = shown;
+    }
+    renderExceptions(shown, response.disabledHosts);
+    paintProtectOptions(shown, response.settings);
+    paintDevProtect(response);
+    setStatus(type === 'ADD_PROTECT_EXCEPTION' ? 'This site is paused.' : 'This site is covered again.');
   } catch {
     setStatus(GENERIC_ERROR);
+  } finally {
+    exception?.setAttribute('aria-busy', 'false');
   }
 }
 
@@ -942,11 +1010,19 @@ for (const id of ['protect-hide-text', 'protect-mask-data', 'mask-api', 'mask-ca
       try {
         const response = await sendToBackground({ type: 'UPDATE_PROTECT_SETTINGS', ...next });
         if (!response.ok) {
-          setStatus(GENERIC_ERROR);
+          setStatus(response.error === 'PROTECT_UNAVAILABLE' ? PROTECT_SCRIPT_FAILED : GENERIC_ERROR);
           await refreshProtect();
           return;
         }
-        paintProtectOptions(response.active, response.settings);
+        const shown = protectShown(response);
+        const master = protectToggle();
+        if (master && !protectBusy) {
+          master.checked = shown;
+        }
+        renderExceptions(shown, response.disabledHosts);
+        paintProtectOptions(shown, response.settings);
+        paintDevProtect(response);
+        setStatus(PROTECT_SAVED);
       } catch {
         setStatus(GENERIC_ERROR);
       }
@@ -963,28 +1039,32 @@ protectToggle()?.addEventListener('change', () => {
   if (wantOn && knownPaid === false) {
     input.checked = false;
     openUpgrade(input);
+    setStatus(PROTECT_PRO_ONLY);
     return;
   }
   if (!wantOn) {
     protectBusy = true;
     input.disabled = true;
+    input.setAttribute('aria-busy', 'true');
     void (async () => {
       try {
         const response = await sendToBackground({ type: 'DISABLE_PROTECT_ALL' });
         if (!response.ok) {
           input.checked = true;
-          setStatus(GENERIC_ERROR);
+          setStatus(PROTECT_TURN_OFF_FAILED);
           return;
         }
-        input.checked = response.active;
-        renderExceptions(response.active, response.disabledHosts);
+        input.checked = protectShown(response);
+        renderExceptions(input.checked, response.disabledHosts);
         paintProtectOptions(response.active, response.settings);
-        setStatus('Protect all sites is off.');
+        paintDevProtect(response);
+        setStatus(PROTECT_OFF);
       } catch {
         input.checked = true;
-        setStatus(GENERIC_ERROR);
+        setStatus(PROTECT_TURN_OFF_FAILED);
       } finally {
         input.disabled = false;
+        input.setAttribute('aria-busy', 'false');
         protectBusy = false;
       }
     })();
@@ -994,36 +1074,51 @@ protectToggle()?.addEventListener('change', () => {
   const grant = chrome.permissions.request({ origins: ['<all_urls>'] });
   protectBusy = true;
   input.disabled = true;
+  input.setAttribute('aria-busy', 'true');
   void (async () => {
     try {
       const allowed = await grant;
       if (!allowed) {
         input.checked = false;
+        renderExceptions(false, []);
         setStatus(PERMISSION_DENIED);
         return;
       }
       const response = await sendToBackground({ type: 'ENABLE_PROTECT_ALL' });
       if (!response.ok) {
         input.checked = false;
+        renderExceptions(false, []);
+        paintDevProtect(null);
         if (isUpgradeError(response)) {
           openUpgrade(input);
+          setStatus(PROTECT_PRO_ONLY);
           await refreshEntitlement();
         } else if (response.error === 'PRO_UNAVAILABLE') {
           setStatus(PRO_UNVERIFIED);
+        } else if (response.error === 'PERMISSION_DENIED') {
+          setStatus(PERMISSION_DENIED);
         } else {
-          setStatus(GENERIC_ERROR);
+          setStatus(PROTECT_SCRIPT_FAILED);
         }
         return;
       }
-      input.checked = response.active;
-      renderExceptions(response.active, response.disabledHosts);
+      const shown = protectShown(response);
+      input.checked = shown;
+      renderExceptions(shown, response.disabledHosts);
       paintProtectOptions(response.active, response.settings);
-      setStatus(response.active ? 'Protect all sites is on.' : 'Protect all sites is off.');
+      paintDevProtect(response);
+      if (!shown) {
+        setStatus(PROTECT_SCRIPT_FAILED);
+        return;
+      }
+      setStatus('Protect all sites is on. New pages you open are covered.');
     } catch {
       input.checked = false;
-      setStatus(GENERIC_ERROR);
+      renderExceptions(false, []);
+      setStatus(PROTECT_SCRIPT_FAILED);
     } finally {
       input.disabled = false;
+      input.setAttribute('aria-busy', 'false');
       protectBusy = false;
     }
   })();
@@ -1047,7 +1142,7 @@ async function refreshPageAccess(): Promise<void> {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     const url = typeof tab?.url === 'string' ? tab.url : null;
-    pageBlocked = url !== null && isBlockedPageUrl(url);
+    pageBlocked = url !== null && isBlockedPageUrl(url, chrome.runtime.id);
   } catch {
     pageBlocked = false;
   }
@@ -1056,60 +1151,162 @@ async function refreshPageAccess(): Promise<void> {
   }
 }
 
-const SHORTCUT_ROWS: ReadonlyArray<readonly [string, string]> = [
-  ['capture-area', 'Capture area'],
-  ['quick-mask', 'Quick mask'],
-  ['toggle-protect', 'Toggle protect'],
-];
+function renderShortcutSlots(commands: readonly ShortcutCommand[]): void {
+  const platform = shortcutPlatform(navigator.userAgent);
+  const byName = new Map(commands.map((command) => [command.name, command]));
+  for (const slot of document.querySelectorAll('[data-command]')) {
+    if (!(slot instanceof HTMLElement) || slot.id === 'shortcut-list') {
+      continue;
+    }
+    const name = slot.dataset.command ?? '';
+    const command = byName.get(name);
+    const formatted = formatCommandShortcut(command?.shortcut, platform);
+    const unset = formatted === SHORTCUT_NOT_SET;
+    let key = slot.querySelector('.kbd');
+    if (!(key instanceof HTMLElement)) {
+      key = document.createElement('span');
+      key.className = 'kbd';
+      slot.append(key);
+    }
+    key.textContent = formatted;
+    let setButton: HTMLButtonElement | null =
+      slot.querySelector('.set-shortcut') instanceof HTMLButtonElement
+        ? (slot.querySelector('.set-shortcut') as HTMLButtonElement)
+        : null;
+    if (!(setButton instanceof HTMLButtonElement)) {
+      const buttonEl = document.createElement('button');
+      buttonEl.type = 'button';
+      buttonEl.className = 'text-link set-shortcut';
+      buttonEl.textContent = 'Set shortcut';
+      slot.append(buttonEl);
+      setButton = buttonEl;
+    }
+    setButton.hidden = !unset;
+    const action = slot.dataset.action ?? 'Shortcut';
+    slot.setAttribute('role', 'group');
+    slot.setAttribute('aria-label', unset ? `${action} shortcut not set` : `${action} shortcut ${formatted}`);
+    const controlId = slot.dataset.for;
+    const control = controlId ? document.getElementById(controlId) : null;
+    const keys = ariaKeyshortcuts(command?.shortcut);
+    if (control instanceof HTMLElement) {
+      if (keys) {
+        control.setAttribute('aria-keyshortcuts', keys);
+      } else {
+        control.removeAttribute('aria-keyshortcuts');
+      }
+    }
+  }
+}
 
-function renderShortcutRows(commands: chrome.commands.Command[]): void {
+function renderShortcutRows(commands: readonly ShortcutCommand[]): void {
   const list = document.getElementById('shortcut-list');
   if (!list) {
     return;
   }
-  const rows: HTMLLIElement[] = [];
-  for (const [name, label] of SHORTCUT_ROWS) {
-    const command = commands.find((item) => item.name === name);
+  const platform = shortcutPlatform(navigator.userAgent);
+  const ordered = orderedShortcutCommands(commands);
+  list.replaceChildren();
+  if (ordered.length === 0) {
+    const empty = document.createElement('li');
+    empty.className = 'hint';
+    empty.textContent = 'No shortcuts to show yet. Use Change shortcuts to add one.';
+    list.append(empty);
+    return;
+  }
+  for (const command of ordered) {
     const row = document.createElement('li');
     row.className = 'shortcut-row';
     const nameEl = document.createElement('span');
-    nameEl.textContent = label;
+    nameEl.textContent = commandActionLabel(command.name, command.description);
+    const formatted = formatCommandShortcut(command.shortcut, platform);
     const keyEl = document.createElement('span');
     keyEl.className = 'shortcut-key';
-    const shortcut = command?.shortcut ?? '';
-    keyEl.textContent = shortcut.length > 0 ? shortcut : 'Not set';
+    keyEl.textContent = formatted;
     row.append(nameEl, keyEl);
-    rows.push(row);
+    if (formatted === SHORTCUT_NOT_SET) {
+      const setButton = document.createElement('button');
+      setButton.type = 'button';
+      setButton.className = 'text-link set-shortcut';
+      setButton.textContent = 'Set shortcut';
+      row.append(setButton);
+    }
+    list.append(row);
   }
-  list.replaceChildren(...rows);
 }
 
 async function refreshShortcuts(): Promise<void> {
+  let commands: ShortcutCommand[] = [];
   try {
-    renderShortcutRows(await chrome.commands.getAll());
+    commands = listedCommands(await chrome.commands.getAll());
   } catch {
-    renderShortcutRows([]);
+    commands = [];
+  }
+  renderShortcutSlots(commands);
+  renderShortcutRows(commands);
+}
+
+function openShortcutSettings(): void {
+  void chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
+}
+
+document.body.addEventListener('click', (event) => {
+  if (!event.isTrusted || !(event.target instanceof HTMLElement)) {
+    return;
+  }
+  const hintButton = event.target.closest('[data-hint-key]');
+  if (hintButton instanceof HTMLButtonElement) {
+    const key = hintButton.dataset.hintKey;
+    const tip = hintButton.closest('.tip');
+    if (tip instanceof HTMLElement) {
+      tip.hidden = true;
+    }
+    if (key) {
+      void chrome.storage.local.set({ [key]: true });
+    }
+    return;
+  }
+  if (event.target.closest('.set-shortcut') || event.target.id === 'change-shortcuts') {
+    openShortcutSettings();
+  }
+});
+
+button('open-help')?.addEventListener('click', (event) => {
+  if (!event.isTrusted) {
+    return;
+  }
+  void chrome.tabs.create({ url: chrome.runtime.getURL('src/welcome/index.html') });
+});
+
+async function refreshHints(): Promise<void> {
+  const keys = [HINT_PROTECT_SEEN_KEY, HINT_CAPTURE_SEEN_KEY, HINT_TOOLS_SEEN_KEY];
+  let stored: Record<string, unknown> = {};
+  try {
+    stored = await chrome.storage.local.get(keys);
+  } catch {
+    stored = {};
+  }
+  const tips: ReadonlyArray<readonly [string, string]> = [
+    ['tip-protect', HINT_PROTECT_SEEN_KEY],
+    ['tip-capture', HINT_CAPTURE_SEEN_KEY],
+    ['tip-tools', HINT_TOOLS_SEEN_KEY],
+  ];
+  for (const [id, key] of tips) {
+    const tip = document.getElementById(id);
+    if (tip instanceof HTMLElement) {
+      tip.hidden = !hintStillNeeded(stored[key]);
+    }
   }
 }
 
-button('change-shortcuts')?.addEventListener('click', () => {
-  void chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
-});
-
 void (async () => {
   await refreshPageAccess();
-  try {
-    const stored = await chrome.storage.local.get(AUTO_COPY_KEY);
-    if (autoCopyInput instanceof HTMLInputElement) {
-      autoCopyInput.checked = stored[AUTO_COPY_KEY] !== false;
-    }
-  } catch {
-    // Missing storage keeps the default, which is on.
-  }
+  await refreshHints();
   await refreshEntitlement();
   await refreshShortcuts();
   const grantNeeded = await refreshProtect();
   if (grantNeeded && !pageBlocked) {
     setStatus(GRANT_NEEDED);
+  } else if (statusEl?.textContent === LOADING_STATUS) {
+    setStatus(READY_STATUS);
   }
 })();

@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "DOMGuard - Hide Secrets & Hidden AI Prompts",
-  "version": "1.0.0",
-  "description": "Hides API keys, emails, and other secrets in screenshots, and detects hidden text that can hijack AI.",
+  "name": "DOMGuard - Hide Secrets Before You Share or Paste to AI",
+  "version": "1.1.0",
+  "minimum_chrome_version": "110",
+  "description": "Hide API keys, emails and card numbers on any page, then copy a clean screenshot to share or paste into AI tools.",
   "permissions": ["activeTab", "storage", "scripting"],
   "host_permissions": ["https://extensionpay.com/*"],
   "optional_host_permissions": ["<all_urls>"],

@@ -49,7 +49,33 @@ export const ALL_SITES_SLOW_THROTTLE_MS = 2000;
 /** Two agreeing samples must be at least this far apart before a hide. */
 export const STABILITY_GAP_MS = 400;
 
-/** How long after Protect Mode starts the circuit breaker can trip. */
+/**
+ * Delay before the second evaluation. It is inside 400–600ms and at least
+ * the stability gap, so the follow-up does not need a DOM mutation.
+ */
+export const CONFIRM_FOLLOW_UP_MS = 500;
+
+export type HideRecheckPlan = 'hide' | 'recheck' | 'clear';
+
+/**
+ * A hidden candidate is always looked at again, including while it moves.
+ * Only a settled, already-confirmed sample may hide.
+ */
+export function planHideRecheck(input: {
+  hasFinding: boolean;
+  inMotion: boolean;
+  confirmed: boolean;
+}): HideRecheckPlan {
+  if (!input.hasFinding) {
+    return 'clear';
+  }
+  if (input.confirmed && !input.inMotion) {
+    return 'hide';
+  }
+  return 'recheck';
+}
+
+/** Rolling window for the circuit breaker. Older hides and flips drop out. */
 export const BREAKER_WINDOW_MS = 5000;
 
 export const BREAKER_MAX_ELEMENTS = 25;
@@ -219,20 +245,41 @@ export function advanceHideConfirmation(
   return { firstSeenAt, hide: false };
 }
 
+/** How long the tripped badge stays up. The service worker owns the badge. */
+export const BREAKER_BADGE_MS = 3000;
+
+/**
+ * Rolling window, not a one-shot timer from when protection started.
+ * Events older than the window no longer count.
+ */
 export function shouldTripProtect(input: {
-  elapsedMs: number;
-  hiddenElements: number;
-  hiddenChars: number;
-  maxFlipsOnOneElement: number;
+  now: number;
+  hides: readonly { at: number; chars: number }[];
+  flips: readonly { at: number; key: number }[];
 }): boolean {
-  if (input.elapsedMs > BREAKER_WINDOW_MS) {
-    return false;
+  const start = input.now - BREAKER_WINDOW_MS;
+  let elements = 0;
+  let chars = 0;
+  for (const hide of input.hides) {
+    if (hide.at < start || hide.at > input.now) {
+      continue;
+    }
+    elements += 1;
+    chars += hide.chars;
   }
-  return (
-    input.hiddenElements > BREAKER_MAX_ELEMENTS ||
-    input.hiddenChars > BREAKER_MAX_CHARS ||
-    input.maxFlipsOnOneElement >= BREAKER_MAX_FLIPS
-  );
+  const counts = new Map<number, number>();
+  let maxFlips = 0;
+  for (const flip of input.flips) {
+    if (flip.at < start || flip.at > input.now) {
+      continue;
+    }
+    const next = (counts.get(flip.key) ?? 0) + 1;
+    counts.set(flip.key, next);
+    if (next > maxFlips) {
+      maxFlips = next;
+    }
+  }
+  return elements > BREAKER_MAX_ELEMENTS || chars > BREAKER_MAX_CHARS || maxFlips >= BREAKER_MAX_FLIPS;
 }
 
 /** Contrast of text painted over an already judged opaque background. */
