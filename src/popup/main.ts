@@ -8,7 +8,7 @@ import {
   type MaskStyle,
   type ProtectAllStateResponse,
 } from '../shared/messages';
-import { HINT_CAPTURE_SEEN_KEY, HINT_PROTECT_SEEN_KEY, HINT_TOOLS_SEEN_KEY } from '../shared/config';
+import { HINT_CAPTURE_SEEN_KEY, HINT_PROTECT_SEEN_KEY, HINT_TOOLS_SEEN_KEY, CUSTOM_CAPTURE_HEIGHT_KEY, CUSTOM_CAPTURE_WIDTH_KEY } from '../shared/config';
 import { hintStillNeeded } from '../shared/hints';
 import {
   SHORTCUT_NOT_SET,
@@ -25,6 +25,7 @@ import {
   copiedToClipboardNote,
   dataUrlToPngBlob,
 } from '../shared/clipboard';
+import { storedCustomPixel } from './custom-size';
 import { isBlockedPageUrl } from './page-access';
 import { unpaidScreenshotQuotaText } from './quota-copy';
 import { normalizeStoredHostname, shouldRunOnHost } from '../content/protect-decision';
@@ -418,15 +419,48 @@ function readCustomPixels(): { width: number; height: number } | null {
   if (!(widthInput instanceof HTMLInputElement) || !(heightInput instanceof HTMLInputElement)) {
     return null;
   }
-  const width = Number(widthInput.value);
-  const height = Number(heightInput.value);
-  if (!Number.isInteger(width) || !Number.isInteger(height)) {
-    return null;
-  }
-  if (width < 16 || width > 8000 || height < 16 || height > 8000) {
+  const width = storedCustomPixel(Number(widthInput.value));
+  const height = storedCustomPixel(Number(heightInput.value));
+  if (width === null || height === null) {
     return null;
   }
   return { width, height };
+}
+
+function sizeInput(elementId: 'custom-width' | 'custom-height'): HTMLInputElement | null {
+  const input = document.getElementById(elementId);
+  return input instanceof HTMLInputElement ? input : null;
+}
+
+function rememberCustomSide(key: string, raw: string): void {
+  if (raw.trim() === '') {
+    void chrome.storage.local.remove(key);
+    return;
+  }
+  const pixel = storedCustomPixel(Number(raw));
+  if (pixel === null) {
+    return;
+  }
+  void chrome.storage.local.set({ [key]: pixel });
+}
+
+async function restoreCustomSize(): Promise<void> {
+  let stored: Record<string, unknown> = {};
+  try {
+    stored = await chrome.storage.local.get([CUSTOM_CAPTURE_WIDTH_KEY, CUSTOM_CAPTURE_HEIGHT_KEY]);
+  } catch {
+    return;
+  }
+  const width = storedCustomPixel(stored[CUSTOM_CAPTURE_WIDTH_KEY]);
+  const height = storedCustomPixel(stored[CUSTOM_CAPTURE_HEIGHT_KEY]);
+  const widthInput = sizeInput('custom-width');
+  const heightInput = sizeInput('custom-height');
+  if (width !== null && widthInput) {
+    widthInput.value = String(width);
+  }
+  if (height !== null && heightInput) {
+    heightInput.value = String(height);
+  }
 }
 
 async function startAreaCapture(
@@ -494,7 +528,25 @@ customSizeButton?.addEventListener('click', (event) => {
     setStatus('Enter a width and height from 16 to 8000, then try again.');
     return;
   }
+  void chrome.storage.local.set({
+    [CUSTOM_CAPTURE_WIDTH_KEY]: size.width,
+    [CUSTOM_CAPTURE_HEIGHT_KEY]: size.height,
+  });
   void startAreaCapture(customSizeButton, size);
+});
+
+sizeInput('custom-width')?.addEventListener('input', (event) => {
+  if (!event.isTrusted || !(event.target instanceof HTMLInputElement)) {
+    return;
+  }
+  rememberCustomSide(CUSTOM_CAPTURE_WIDTH_KEY, event.target.value);
+});
+
+sizeInput('custom-height')?.addEventListener('input', (event) => {
+  if (!event.isTrusted || !(event.target instanceof HTMLInputElement)) {
+    return;
+  }
+  rememberCustomSide(CUSTOM_CAPTURE_HEIGHT_KEY, event.target.value);
 });
 
 /**
@@ -1298,6 +1350,7 @@ async function refreshHints(): Promise<void> {
 }
 
 void (async () => {
+  await restoreCustomSize();
   await refreshPageAccess();
   await refreshHints();
   await refreshEntitlement();

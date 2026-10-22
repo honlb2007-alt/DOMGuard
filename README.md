@@ -23,7 +23,7 @@ Detection is best-effort. It cannot guarantee that every secret or every hidden 
 | Permission | Why it is needed |
 | --- | --- |
 | `activeTab` | After you open DOMGuard, capture the visible area of that tab and inject the masker into it. This is not a standing permission to read every site. |
-| `storage` | Save settings and the daily free-screenshot count in `chrome.storage.local`. ExtensionPay uses `chrome.storage.sync` for its purchase record, described below. Page text and screenshot bytes are not stored. |
+| `storage` | Save settings, the last custom capture width and height, and the daily free-screenshot count in `chrome.storage.local`. ExtensionPay uses `chrome.storage.sync` for its purchase record, described below. Page text and screenshot bytes are not stored. |
 | `scripting` | Inject `content.js` into the active tab when you use a feature. Protect all sites registers `protect-all.js` and `automask.js` at runtime, only after you turn that feature on. Those scripts are not listed as manifest content scripts. |
 | `host_permissions`: `https://extensionpay.com/*` | Let the service worker talk to ExtensionPay. No other host is listed. |
 | Optional `optional_host_permissions`: `<all_urls>` | Requested only when a paid install turns on Protect all sites. Turning the feature off removes it when nothing else needs it. It is not requested at install. |

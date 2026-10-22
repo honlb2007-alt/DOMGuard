@@ -2,6 +2,7 @@
 
 import { parseColor, relativeLuminance, type Rgba } from './contrast';
 import { INSTRUCTION_PHRASES } from '../shared/instruction';
+import { DEFAULT_MASK_TYPES, type MaskTypeSelection } from '../shared/patterns';
 
 export { INSTRUCTION_PHRASES };
 
@@ -37,6 +38,16 @@ export const PROTECT_GRANT_NEEDED_KEY = 'protectGrantNeeded';
 
 export function storedBool(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback;
+}
+
+/** The mask-type checkboxes. A missing value keeps the default, so email and phone stay off. */
+export function maskSelectionFrom(stored: Record<string, unknown>): MaskTypeSelection {
+  return {
+    apiKeys: storedBool(stored[MASK_API_KEYS_KEY], DEFAULT_MASK_TYPES.apiKeys),
+    cards: storedBool(stored[MASK_CARDS_KEY], DEFAULT_MASK_TYPES.cards),
+    emails: storedBool(stored[MASK_EMAILS_KEY], DEFAULT_MASK_TYPES.emails),
+    phones: storedBool(stored[MASK_PHONES_KEY], DEFAULT_MASK_TYPES.phones),
+  };
 }
 
 /** Work per idle slice, and the point where later slices are scheduled less often. */

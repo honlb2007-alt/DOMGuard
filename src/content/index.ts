@@ -12,6 +12,14 @@ import { dismissHiddenReview, showHiddenReview } from './hidden-review';
 import { startRegionSelection } from './region-capture';
 import { altPeekIntent } from './alt-peek';
 import {
+  MASK_API_KEYS_KEY,
+  MASK_CARDS_KEY,
+  MASK_EMAILS_KEY,
+  MASK_PHONES_KEY,
+  MASK_STYLE_KEY,
+  maskSelectionFrom,
+} from './protect-decision';
+import {
   applyMasks,
   clearMasks as clearAllMasks,
   maskCount,
@@ -22,6 +30,7 @@ import {
 } from './masker';
 import { stopPicker, togglePicker as toggleElementPicker } from './picker';
 import { scanPage, type PageMatch } from './scanner';
+import { enabledPatternIds } from '../shared/patterns';
 import {
   parseExtensionMessage,
   toErrorResponse,
@@ -45,9 +54,21 @@ let lastScan: PageMatch[] = [];
 let maskStyle: MaskStyle = 'black';
 
 async function runScan(style: MaskStyle): Promise<ResponseFor<'SCAN_AND_MASK'>> {
+  let stored: Record<string, unknown> = {};
+  try {
+    stored = await chrome.storage.local.get([
+      MASK_API_KEYS_KEY,
+      MASK_CARDS_KEY,
+      MASK_EMAILS_KEY,
+      MASK_PHONES_KEY,
+      MASK_STYLE_KEY,
+    ]);
+  } catch {
+    stored = {};
+  }
   maskStyle = style;
-  lastScan = await scanPage();
-  applyMasks(lastScan, style);
+  lastScan = await scanPage(enabledPatternIds(maskSelectionFrom(stored)));
+  applyMasks(lastScan, maskStyle);
 
   const byType: Record<string, number> = {};
   for (const match of lastScan) {

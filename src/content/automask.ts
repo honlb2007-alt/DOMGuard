@@ -23,6 +23,7 @@ import {
   MASK_STYLE_KEY,
   PROTECT_ALL_KEY,
   PROTECT_DISABLED_HOSTS_KEY,
+  maskSelectionFrom,
   protectAllThrottleMs,
   shouldRunOnHost,
   storedBool,
@@ -240,12 +241,7 @@ function hostList(value: unknown): string[] {
 }
 
 function selectionFrom(stored: Record<string, unknown>): MaskTypeSelection {
-  return {
-    apiKeys: storedBool(stored[MASK_API_KEYS_KEY], DEFAULT_MASK_TYPES.apiKeys),
-    cards: storedBool(stored[MASK_CARDS_KEY], DEFAULT_MASK_TYPES.cards),
-    emails: storedBool(stored[MASK_EMAILS_KEY], DEFAULT_MASK_TYPES.emails),
-    phones: storedBool(stored[MASK_PHONES_KEY], DEFAULT_MASK_TYPES.phones),
-  };
+  return maskSelectionFrom(stored);
 }
 
 function sameIds(next: ReadonlySet<string>): boolean {
