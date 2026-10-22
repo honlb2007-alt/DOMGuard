@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { FREE_DAILY_SCREENSHOTS } from '../shared/config';
+
 vi.mock('extpay', () => ({
   default: vi.fn(() => ({
     getUser: vi.fn(),
@@ -36,7 +38,7 @@ function installChromeStorage(): void {
 
 installChromeStorage();
 
-const { consumeScreenshotQuota, getQuota } = await import('./entitlement');
+const { consumeScreenshotQuota, getQuota, takeFreeScreenshot } = await import('./entitlement');
 
 describe('screenshot quota', () => {
   beforeEach(() => {
@@ -48,33 +50,60 @@ describe('screenshot quota', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 9, 18, 23, 30, 0));
     expect(await consumeScreenshotQuota()).toBe(true);
-    expect(await consumeScreenshotQuota()).toBe(true);
-    expect(await getQuota()).toEqual({ used: 2, remaining: 1, limit: 3 });
+    expect(await getQuota()).toEqual({
+      used: 1,
+      remaining: FREE_DAILY_SCREENSHOTS - 1,
+      limit: FREE_DAILY_SCREENSHOTS,
+    });
 
     vi.setSystemTime(new Date(2026, 9, 19, 0, 5, 0));
-    expect(await getQuota()).toEqual({ used: 0, remaining: 3, limit: 3 });
+    expect(await getQuota()).toEqual({
+      used: 0,
+      remaining: FREE_DAILY_SCREENSHOTS,
+      limit: FREE_DAILY_SCREENSHOTS,
+    });
     expect(await consumeScreenshotQuota()).toBe(true);
-    expect(await getQuota()).toEqual({ used: 1, remaining: 2, limit: 3 });
+    expect(await getQuota()).toEqual({
+      used: 1,
+      remaining: FREE_DAILY_SCREENSHOTS - 1,
+      limit: FREE_DAILY_SCREENSHOTS,
+    });
   });
 
-  it('returns false on the 4th screenshot of the day', async () => {
-    expect(await consumeScreenshotQuota()).toBe(true);
-    expect(await consumeScreenshotQuota()).toBe(true);
-    expect(await consumeScreenshotQuota()).toBe(true);
+  it('stops when the daily constant is used', async () => {
+    if (!Number.isFinite(FREE_DAILY_SCREENSHOTS)) {
+      expect(await consumeScreenshotQuota()).toBe(true);
+      return;
+    }
+    for (let index = 0; index < FREE_DAILY_SCREENSHOTS; index += 1) {
+      expect(await consumeScreenshotQuota()).toBe(true);
+    }
     expect(await consumeScreenshotQuota()).toBe(false);
-    expect(await getQuota()).toEqual({ used: 3, remaining: 0, limit: 3 });
+    expect(await getQuota()).toEqual({ used: FREE_DAILY_SCREENSHOTS, remaining: 0, limit: FREE_DAILY_SCREENSHOTS });
   });
 
-  it('lets only 3 of 5 overlapping calls succeed', async () => {
-    const results = await Promise.all([
-      consumeScreenshotQuota(),
-      consumeScreenshotQuota(),
-      consumeScreenshotQuota(),
-      consumeScreenshotQuota(),
-      consumeScreenshotQuota(),
-    ]);
-    expect(results.filter((allowed) => allowed)).toHaveLength(3);
+  it('lets only the daily allowance succeed when calls overlap', async () => {
+    if (!Number.isFinite(FREE_DAILY_SCREENSHOTS)) {
+      return;
+    }
+    const results = await Promise.all(
+      Array.from({ length: FREE_DAILY_SCREENSHOTS + 2 }, () => consumeScreenshotQuota()),
+    );
+    expect(results.filter((allowed) => allowed)).toHaveLength(FREE_DAILY_SCREENSHOTS);
     expect(results.filter((allowed) => !allowed)).toHaveLength(2);
-    expect(await getQuota()).toEqual({ used: 3, remaining: 0, limit: 3 });
+    expect(await getQuota()).toEqual({ used: FREE_DAILY_SCREENSHOTS, remaining: 0, limit: FREE_DAILY_SCREENSHOTS });
+  });
+
+  it('does not count a capture that throws', async () => {
+    await expect(
+      takeFreeScreenshot(async () => {
+        throw new Error('no');
+      }),
+    ).rejects.toThrow('no');
+    expect(await getQuota()).toEqual({
+      used: 0,
+      remaining: FREE_DAILY_SCREENSHOTS,
+      limit: FREE_DAILY_SCREENSHOTS,
+    });
   });
 });

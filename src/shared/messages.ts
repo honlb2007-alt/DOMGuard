@@ -42,16 +42,79 @@ export interface CaptureScreenshotMessage {
   type: 'CAPTURE_SCREENSHOT';
 }
 
-export interface EnableProtectMessage {
-  type: 'ENABLE_PROTECT';
+/** Open the on-page region overlay. Width and height are output pixels. */
+export interface StartRegionCaptureMessage {
+  type: 'START_REGION_CAPTURE';
+  width?: number;
+  height?: number;
 }
 
-export interface DisableProtectMessage {
-  type: 'DISABLE_PROTECT';
+/** CSS-pixel selection plus the viewport it was drawn in. */
+export interface CaptureRegionMessage {
+  type: 'CAPTURE_REGION';
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  innerWidth: number;
+  innerHeight: number;
+  devicePixelRatio: number;
 }
 
-export interface GetProtectStateMessage {
-  type: 'GET_PROTECT_STATE';
+/** Count one free screenshot after the picture is on the clipboard. */
+export interface CountCopiedScreenshotMessage {
+  type: 'COUNT_COPIED_SCREENSHOT';
+}
+
+export interface EnableProtectAllMessage {
+  type: 'ENABLE_PROTECT_ALL';
+}
+
+export interface DisableProtectAllMessage {
+  type: 'DISABLE_PROTECT_ALL';
+}
+
+export interface GetProtectAllMessage {
+  type: 'GET_PROTECT_ALL';
+}
+
+export interface UpdateProtectSettingsMessage {
+  type: 'UPDATE_PROTECT_SETTINGS';
+  hideText: boolean;
+  maskSensitive: boolean;
+  apiKeys: boolean;
+  cards: boolean;
+  emails: boolean;
+  phones: boolean;
+}
+
+/** Tells the auto-mask script to remove its overlays. */
+export interface ClearAutoMaskMessage {
+  type: 'CLEAR_AUTO_MASK';
+}
+
+export interface AddProtectExceptionMessage {
+  type: 'ADD_PROTECT_EXCEPTION';
+  host: string;
+}
+
+export interface RemoveProtectExceptionMessage {
+  type: 'REMOVE_PROTECT_EXCEPTION';
+  host: string;
+}
+
+/** Tells an already-injected protect script to put the page back. */
+export interface RestoreProtectAllMessage {
+  type: 'RESTORE_PROTECT_ALL';
+}
+
+/** Tells the service worker this page tripped the hide breaker. */
+export interface NoteProtectTripMessage {
+  type: 'NOTE_PROTECT_TRIP';
+}
+
+export interface NoteProtectTripResponse {
+  ok: true;
 }
 
 export interface CheckProMessage {
@@ -80,9 +143,18 @@ export type ExtensionMessage =
   | SanitizeBeforeCaptureMessage
   | RestoreAfterCaptureMessage
   | CaptureScreenshotMessage
-  | EnableProtectMessage
-  | DisableProtectMessage
-  | GetProtectStateMessage
+  | StartRegionCaptureMessage
+  | CaptureRegionMessage
+  | CountCopiedScreenshotMessage
+  | EnableProtectAllMessage
+  | DisableProtectAllMessage
+  | GetProtectAllMessage
+  | UpdateProtectSettingsMessage
+  | ClearAutoMaskMessage
+  | AddProtectExceptionMessage
+  | RemoveProtectExceptionMessage
+  | RestoreProtectAllMessage
+  | NoteProtectTripMessage
   | CheckProMessage
   | GetStatusMessage
   | OpenUpgradeMessage;
@@ -124,17 +196,9 @@ export type HiddenReason =
   | 'offscreen'
   | 'clipped';
 
-/** A finding without its element, so it can cross the message boundary. */
-export interface HiddenFindingReport {
-  preview: string;
-  reason: HiddenReason;
-  contrastRatio?: number;
-}
-
 export interface DetectHiddenTextResponse {
   ok: true;
   count: number;
-  findings: HiddenFindingReport[];
 }
 
 export interface SanitizeBeforeCaptureResponse {
@@ -152,9 +216,44 @@ export interface CaptureScreenshotResponse {
   dataUrl: string | null;
 }
 
-export interface ProtectStateResponse {
+export interface StartRegionCaptureResponse {
   ok: true;
+}
+
+export interface CaptureRegionResponse {
+  ok: true;
+  dataUrl: string;
+}
+
+export interface CountCopiedScreenshotResponse {
+  ok: true;
+}
+
+export interface ProtectSettings {
+  hideText: boolean;
+  maskSensitive: boolean;
+  apiKeys: boolean;
+  cards: boolean;
+  emails: boolean;
+  phones: boolean;
+  maskStyle: MaskStyle;
+  grantNeeded: boolean;
+}
+
+export interface ProtectAllStateResponse {
+  ok: true;
+  /** Stored protectAll flag after startup and permission checks. */
   active: boolean;
+  /** Every script that the current sub-options require is registered. */
+  registered: boolean;
+  /** Optional <all_urls> host permission is currently granted. */
+  permissionGranted: boolean;
+  disabledHosts: string[];
+  settings: ProtectSettings;
+}
+
+export interface RestoreProtectAllResponse {
+  ok: true;
 }
 
 export interface CheckProResponse {
@@ -193,9 +292,18 @@ export interface SuccessResponseMap {
   SANITIZE_BEFORE_CAPTURE: SanitizeBeforeCaptureResponse;
   RESTORE_AFTER_CAPTURE: RestoreAfterCaptureResponse;
   CAPTURE_SCREENSHOT: CaptureScreenshotResponse;
-  ENABLE_PROTECT: ProtectStateResponse;
-  DISABLE_PROTECT: ProtectStateResponse;
-  GET_PROTECT_STATE: ProtectStateResponse;
+  START_REGION_CAPTURE: StartRegionCaptureResponse;
+  CAPTURE_REGION: CaptureRegionResponse;
+  COUNT_COPIED_SCREENSHOT: CountCopiedScreenshotResponse;
+  ENABLE_PROTECT_ALL: ProtectAllStateResponse;
+  DISABLE_PROTECT_ALL: ProtectAllStateResponse;
+  GET_PROTECT_ALL: ProtectAllStateResponse;
+  UPDATE_PROTECT_SETTINGS: ProtectAllStateResponse;
+  CLEAR_AUTO_MASK: RestoreProtectAllResponse;
+  ADD_PROTECT_EXCEPTION: ProtectAllStateResponse;
+  REMOVE_PROTECT_EXCEPTION: ProtectAllStateResponse;
+  RESTORE_PROTECT_ALL: RestoreProtectAllResponse;
+  NOTE_PROTECT_TRIP: NoteProtectTripResponse;
   CHECK_PRO: CheckProResponse;
   GET_STATUS: GetStatusResponse;
   OPEN_UPGRADE: OpenUpgradeResponse;
@@ -209,13 +317,31 @@ export type ExtensionResponse = ResponseFor<MessageType>;
 /** Message types the service worker answers without touching the page. */
 export const BACKGROUND_MESSAGE_TYPES = [
   'CAPTURE_SCREENSHOT',
+  'CAPTURE_REGION',
+  'COUNT_COPIED_SCREENSHOT',
   'CHECK_PRO',
   'GET_STATUS',
   'OPEN_UPGRADE',
+  'ENABLE_PROTECT_ALL',
+  'DISABLE_PROTECT_ALL',
+  'GET_PROTECT_ALL',
+  'UPDATE_PROTECT_SETTINGS',
+  'ADD_PROTECT_EXCEPTION',
+  'REMOVE_PROTECT_EXCEPTION',
+  'NOTE_PROTECT_TRIP',
 ] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+/** Output pixels accepted for a fixed-size capture. */
+function isCustomPixel(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 16 && value <= 8000;
 }
 
 function isMaskStyle(value: unknown): value is MaskStyle {
@@ -254,12 +380,83 @@ export function parseExtensionMessage(raw: unknown): ExtensionMessage | null {
       return { type: 'RESTORE_AFTER_CAPTURE' };
     case 'CAPTURE_SCREENSHOT':
       return { type: 'CAPTURE_SCREENSHOT' };
-    case 'ENABLE_PROTECT':
-      return { type: 'ENABLE_PROTECT' };
-    case 'DISABLE_PROTECT':
-      return { type: 'DISABLE_PROTECT' };
-    case 'GET_PROTECT_STATE':
-      return { type: 'GET_PROTECT_STATE' };
+    case 'START_REGION_CAPTURE': {
+      const hasSize = raw.width !== undefined || raw.height !== undefined;
+      if (!hasSize) {
+        return { type: 'START_REGION_CAPTURE' };
+      }
+      return isCustomPixel(raw.width) && isCustomPixel(raw.height)
+        ? { type: 'START_REGION_CAPTURE', width: raw.width, height: raw.height }
+        : null;
+    }
+    case 'CAPTURE_REGION': {
+      const x = raw.x;
+      const y = raw.y;
+      const width = raw.width;
+      const height = raw.height;
+      const innerWidth = raw.innerWidth;
+      const innerHeight = raw.innerHeight;
+      const devicePixelRatio = raw.devicePixelRatio;
+      if (
+        !isFiniteNumber(x) ||
+        !isFiniteNumber(y) ||
+        !isFiniteNumber(width) ||
+        !isFiniteNumber(height) ||
+        !isFiniteNumber(innerWidth) ||
+        !isFiniteNumber(innerHeight) ||
+        !isFiniteNumber(devicePixelRatio)
+      ) {
+        return null;
+      }
+      if (innerWidth <= 0 || innerHeight <= 0 || devicePixelRatio <= 0 || devicePixelRatio > 16) {
+        return null;
+      }
+      if (width < 0 || height < 0 || width > 20000 || height > 20000) {
+        return null;
+      }
+      if (Math.abs(x) > 100000 || Math.abs(y) > 100000) {
+        return null;
+      }
+      return { type: 'CAPTURE_REGION', x, y, width, height, innerWidth, innerHeight, devicePixelRatio };
+    }
+    case 'COUNT_COPIED_SCREENSHOT':
+      return { type: 'COUNT_COPIED_SCREENSHOT' };
+    case 'ENABLE_PROTECT_ALL':
+      return { type: 'ENABLE_PROTECT_ALL' };
+    case 'DISABLE_PROTECT_ALL':
+      return { type: 'DISABLE_PROTECT_ALL' };
+    case 'GET_PROTECT_ALL':
+      return { type: 'GET_PROTECT_ALL' };
+    case 'UPDATE_PROTECT_SETTINGS': {
+      const hideText = raw.hideText;
+      const maskSensitive = raw.maskSensitive;
+      const apiKeys = raw.apiKeys;
+      const cards = raw.cards;
+      const emails = raw.emails;
+      const phones = raw.phones;
+      if (
+        typeof hideText !== 'boolean' ||
+        typeof maskSensitive !== 'boolean' ||
+        typeof apiKeys !== 'boolean' ||
+        typeof cards !== 'boolean' ||
+        typeof emails !== 'boolean' ||
+        typeof phones !== 'boolean'
+      ) {
+        return null;
+      }
+      return { type: 'UPDATE_PROTECT_SETTINGS', hideText, maskSensitive, apiKeys, cards, emails, phones };
+    }
+    case 'CLEAR_AUTO_MASK':
+      return { type: 'CLEAR_AUTO_MASK' };
+    case 'ADD_PROTECT_EXCEPTION':
+    case 'REMOVE_PROTECT_EXCEPTION':
+      return typeof raw.host === 'string'
+        ? { type: raw.type, host: raw.host }
+        : null;
+    case 'RESTORE_PROTECT_ALL':
+      return { type: 'RESTORE_PROTECT_ALL' };
+    case 'NOTE_PROTECT_TRIP':
+      return { type: 'NOTE_PROTECT_TRIP' };
     case 'CHECK_PRO':
       return { type: 'CHECK_PRO' };
     case 'GET_STATUS':

@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build && vite build --config vite.content.config.ts",
+    "build": "tsc --noEmit && vite build && vite build --config vite.content.config.ts && vite build --config vite.protect.config.ts && vite build --config vite.automask.config.ts && vite build --config vite.welcome.config.ts",
+    "build:dev": "tsc --noEmit && vite build --mode development && vite build --mode development --config vite.content.config.ts && vite build --mode development --config vite.protect.config.ts && vite build --mode development --config vite.automask.config.ts && vite build --mode development --config vite.welcome.config.ts",
     "concepts": "node scripts/render-concepts.mjs",
     "concepts-v2": "node scripts/render-concepts-v2.mjs",
     "concepts-v3": "node scripts/render-concepts-v3.mjs",

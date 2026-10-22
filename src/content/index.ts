@@ -3,25 +3,23 @@
 // content_scripts.
 
 import {
-  detectHiddenText,
+  detectReviewFindings,
   restoreAfterCapture as restoreHiddenText,
   sanitizeBeforeCapture as hideHiddenText,
   sanitizedCount,
 } from './hidden-text';
+import { dismissHiddenReview, showHiddenReview } from './hidden-review';
+import { startRegionSelection } from './region-capture';
+import { altPeekIntent } from './alt-peek';
 import {
   applyMasks,
   clearMasks as clearAllMasks,
   maskCount,
+  setMasksPeeled,
   setRescanRequestHandler,
   stopAutoRescan,
   updateMaskStyle,
 } from './masker';
-import {
-  disableProtectMode,
-  enableProtectMode,
-  isProtectModeActive,
-  protectModeState,
-} from './protect';
 import { stopPicker, togglePicker as toggleElementPicker } from './picker';
 import { scanPage, type PageMatch } from './scanner';
 import {
@@ -70,6 +68,8 @@ function restyleMasks(style: MaskStyle): ResponseFor<'UPDATE_MASK_STYLE'> {
 
 function clearMasks(): ResponseFor<'CLEAR_MASKS'> {
   const clearedCount = maskCount();
+  // Restore any temporary reveal styles before the overlay host is removed.
+  dismissHiddenReview();
   // The picker shares the overlay host, so it has to stop before teardown.
   stopPicker();
   clearAllMasks();
@@ -82,14 +82,9 @@ function togglePicker(): ResponseFor<'TOGGLE_PICKER'> {
 }
 
 function reportHiddenText(): ResponseFor<'DETECT_HIDDEN_TEXT'> {
-  // Element references cannot cross the message boundary, so only the
-  // serialisable part of each finding is reported.
-  const findings = detectHiddenText().map((finding) => ({
-    preview: finding.preview,
-    reason: finding.reason,
-    contrastRatio: finding.contrastRatio,
-  }));
-  return { ok: true, count: findings.length, findings };
+  const findings = detectReviewFindings();
+  showHiddenReview(findings);
+  return { ok: true, count: findings.length };
 }
 
 /** Resolves once the browser has reached the next frame, before it paints. */
@@ -115,11 +110,9 @@ async function sanitizeBeforeCapture(): Promise<ResponseFor<'SANITIZE_BEFORE_CAP
 
 function restoreAfterCapture(): ResponseFor<'RESTORE_AFTER_CAPTURE'> {
   const hiddenCount = sanitizedCount();
-  // Protect Mode owns the swept elements until the user turns it off. A
-  // screenshot restore must not paint that text again.
-  if (!isProtectModeActive()) {
-    restoreHiddenText();
-  }
+  // This bundle only restores hides it applied for the screenshot. Protect all
+  // sites keeps its own record in protect-all.js and restores that separately.
+  restoreHiddenText();
   return { ok: true, hiddenCount };
 }
 
@@ -135,20 +128,32 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
       return togglePicker();
     case 'DETECT_HIDDEN_TEXT':
       return reportHiddenText();
+    case 'START_REGION_CAPTURE':
+      return startRegionSelection(
+        message.width !== undefined && message.height !== undefined
+          ? { width: message.width, height: message.height }
+          : undefined,
+      );
+    case 'CAPTURE_REGION':
+      return { ok: false, error: 'CAPTURE_REGION is handled by the service worker.' };
     case 'SANITIZE_BEFORE_CAPTURE':
       return sanitizeBeforeCapture();
     case 'RESTORE_AFTER_CAPTURE':
       return restoreAfterCapture();
-    case 'ENABLE_PROTECT':
-      return enableProtectMode();
-    case 'DISABLE_PROTECT':
-      return disableProtectMode();
-    case 'GET_PROTECT_STATE':
-      return protectModeState();
     case 'CAPTURE_SCREENSHOT':
+    case 'COUNT_COPIED_SCREENSHOT':
     case 'CHECK_PRO':
     case 'GET_STATUS':
     case 'OPEN_UPGRADE':
+    case 'ENABLE_PROTECT_ALL':
+    case 'DISABLE_PROTECT_ALL':
+    case 'GET_PROTECT_ALL':
+    case 'ADD_PROTECT_EXCEPTION':
+    case 'REMOVE_PROTECT_EXCEPTION':
+    case 'RESTORE_PROTECT_ALL':
+    case 'NOTE_PROTECT_TRIP':
+    case 'CLEAR_AUTO_MASK':
+    case 'UPDATE_PROTECT_SETTINGS':
       return { ok: false, error: `${message.type} is handled by the service worker.` };
   }
 }
@@ -183,6 +188,22 @@ if (globalWithFlag[INJECTION_FLAG] !== true) {
     })();
   });
 
+  window.addEventListener('keydown', (event) => {
+    if (altPeekIntent(event) === 'peel') {
+      setMasksPeeled(true);
+    }
+  });
+  window.addEventListener('keyup', (event) => {
+    if (altPeekIntent(event) === 'restore') {
+      setMasksPeeled(false);
+    }
+  });
+  window.addEventListener('blur', (event) => {
+    if (altPeekIntent(event) === 'restore') {
+      setMasksPeeled(false);
+    }
+  });
+
   chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
     // Page scripts cannot call in. There is no postMessage listener, and the
     // only entry is this channel, restricted to our own extension id.
@@ -193,6 +214,11 @@ if (globalWithFlag[INJECTION_FLAG] !== true) {
     if (!parsed) {
       sendResponse({ ok: false, error: 'INVALID_MESSAGE' });
       return true;
+    }
+    // protect-all.js answers this and restores the page. Responding here as
+    // well would steal that reply.
+    if (parsed.type === 'RESTORE_PROTECT_ALL' || parsed.type === 'CLEAR_AUTO_MASK') {
+      return;
     }
     // Scanning batches across idle callbacks, so the channel must stay open.
     handleMessage(parsed)

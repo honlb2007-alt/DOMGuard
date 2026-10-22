@@ -14,6 +14,10 @@ describe('isBlockedPageUrl', () => {
     expect(isBlockedPageUrl('chrome://settings/')).toBe(true);
     expect(isBlockedPageUrl('edge://newtab/')).toBe(true);
     expect(isBlockedPageUrl('chrome-extension://abcdefghijklmnop/popup.html')).toBe(true);
+    expect(isBlockedPageUrl('chrome-extension://abcdefghijklmnop/welcome.html', 'abcdefghijklmnop')).toBe(
+      false,
+    );
+    expect(isBlockedPageUrl('chrome-extension://otherid/welcome.html', 'abcdefghijklmnop')).toBe(true);
     expect(isBlockedPageUrl('https://chromewebstore.google.com/detail/domguard')).toBe(true);
     expect(isBlockedPageUrl('https://chrome.google.com/webstore/category/extensions')).toBe(true);
     expect(isBlockedPageUrl('view-source:https://example.com/')).toBe(true);

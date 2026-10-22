@@ -1,10 +1,20 @@
 import { describe, expect, it } from 'vitest';
 
-import { findSensitive, luhnValid, PATTERNS } from './patterns';
+import {
+  DEFAULT_MASK_TYPES,
+  enabledPatternIds,
+  findSensitive,
+  luhnValid,
+  PATTERNS,
+} from './patterns';
 
 /** Pattern ids found in `text`, in order. */
 function idsIn(text: string): string[] {
   return findSensitive(text).map((match) => match.id);
+}
+
+function idsInFiltered(text: string, ids: ReadonlySet<string>): string[] {
+  return findSensitive(text, ids).map((match) => match.id);
 }
 
 describe('PATTERNS', () => {
@@ -191,6 +201,22 @@ describe('findSensitive — safety', () => {
 
     expect(matches.length).toBeGreaterThan(0);
     expect(elapsed).toBeLessThan(500);
+  });
+
+  it('follows the Protect all sites type switches', () => {
+    const text =
+      'sk-abcdefghijklmnopqrstuvwxyz card 4242424242424242 mail test.user@example.com call +1 415 555 0132';
+    const defaults = enabledPatternIds(DEFAULT_MASK_TYPES);
+    expect(idsInFiltered(text, defaults).sort()).toEqual(['credit_card', 'openai_key']);
+    expect(idsInFiltered(text, enabledPatternIds({ ...DEFAULT_MASK_TYPES, emails: true }))).toContain(
+      'email',
+    );
+    expect(
+      idsInFiltered(
+        text,
+        enabledPatternIds({ apiKeys: false, cards: false, emails: false, phones: false }),
+      ),
+    ).toEqual([]);
   });
 
   it('does not blow up on adversarial repetition', () => {

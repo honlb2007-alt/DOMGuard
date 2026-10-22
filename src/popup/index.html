@@ -9,76 +9,194 @@
   <body>
     <main class="app">
       <header class="header">
-        <div class="title-row">
-          <h1>DOMGuard</h1>
+        <h1>DOMGuard</h1>
+        <div class="header-actions">
+          <button id="open-help" type="button" class="text-link">Help</button>
           <span id="plan-badge" class="badge">…</span>
         </div>
-        <p id="quota-line" class="quota">Checking plan…</p>
       </header>
 
-      <label class="field">
-        <span>Mask style</span>
-        <select id="mask-style">
-          <option value="black">Solid black</option>
-          <option value="blur">Blur</option>
-        </select>
-      </label>
-
-      <div class="actions">
-        <button id="scan-and-mask" type="button" class="btn">
-          <span class="btn-label">Auto Scan &amp; Mask</span>
-        </button>
-        <button id="clear-masks" type="button" class="btn">Clear Masks</button>
-        <button id="toggle-picker" type="button" class="btn">Manual picker: off</button>
-        <button id="detect-hidden-text" type="button" class="btn">
-          <span class="btn-label">Scan Hidden Text</span>
-        </button>
+      <section class="section" aria-labelledby="protection-title">
+        <h2 id="protection-title" class="section-title">Protection</h2>
+        <p id="tip-protect" class="tip" hidden>
+          <span>First time: turn this on to cover every site. You can pause one site later.</span>
+          <button type="button" class="text-link" data-hint-key="hintProtectSeen">Got it</button>
+        </p>
         <div class="protect">
-          <label class="protect-toggle" for="protect-mode">
-            <input id="protect-mode" type="checkbox" />
-            <span>Protect Mode</span>
+          <label class="protect-toggle" for="protect-all">
+            <input id="protect-all" type="checkbox" aria-describedby="hint-protect-all" />
+            <span>Protect all sites</span>
           </label>
+          <div class="shortcut-slot" data-command="toggle-protect" data-for="protect-all" data-action="Protect all sites"></div>
           <span id="protect-pro-mark" class="pro-marks" hidden></span>
         </div>
-        <p class="hint">
-          Hides hidden text on this page while on. Works with any screenshot or screen recording
-          tool.
-        </p>
-        <div class="shot">
-          <div class="shot-actions">
-            <button id="capture-screenshot" type="button" class="btn btn-primary">
-              <span class="btn-label">Safe Screenshot</span>
-            </button>
-            <button id="copy-screenshot" type="button" class="btn">
-              <span class="btn-label">Copy</span>
-            </button>
+        <p id="hint-protect-all" class="hint">Covers every site you visit until you turn it off.</p>
+        <p id="protect-state" class="hint" hidden></p>
+        <p class="hint">Covers the page while you take a screenshot.</p>
+        <div id="protect-options" class="protect-options" hidden>
+          <label class="protect-toggle" for="protect-hide-text">
+            <input id="protect-hide-text" type="checkbox" checked aria-describedby="hint-hide-text" />
+            <span>Hide hidden text</span>
+          </label>
+          <p id="hint-hide-text" class="hint">Hides text that is on the page but not meant to be seen.</p>
+          <label class="protect-toggle" for="protect-mask-data">
+            <input id="protect-mask-data" type="checkbox" checked aria-describedby="hint-mask-data" />
+            <span>Mask sensitive data</span>
+          </label>
+          <p id="hint-mask-data" class="hint">Covers the kinds of secrets you select below.</p>
+          <div class="protect-types">
+            <label class="protect-toggle" for="mask-api">
+              <input id="mask-api" type="checkbox" checked aria-describedby="hint-api" />
+              <span>API keys and tokens</span>
+            </label>
+            <p id="hint-api" class="hint">Covers API keys and tokens.</p>
+            <label class="protect-toggle" for="mask-cards">
+              <input id="mask-cards" type="checkbox" checked aria-describedby="hint-cards" />
+              <span>Credit card numbers</span>
+            </label>
+            <p id="hint-cards" class="hint">Covers card numbers.</p>
+            <label class="protect-toggle" for="mask-emails">
+              <input id="mask-emails" type="checkbox" aria-describedby="hint-emails" />
+              <span>Emails</span>
+            </label>
+            <p id="hint-emails" class="hint">Covers email addresses. Off until you turn it on.</p>
+            <label class="protect-toggle" for="mask-phones">
+              <input id="mask-phones" type="checkbox" aria-describedby="hint-phones" />
+              <span>Phone numbers</span>
+            </label>
+            <p id="hint-phones" class="hint">Covers phone numbers. Off until you turn it on.</p>
           </div>
-          <button id="download-capture" type="button" class="btn" hidden>
-            <span class="btn-label">Download</span>
-          </button>
-          <p class="hint">Captures the visible area only.</p>
         </div>
-      </div>
+        <div id="protect-site-controls" hidden>
+          <label class="protect-toggle" for="protect-disable-site">
+            <input id="protect-disable-site" type="checkbox" aria-describedby="hint-disable-site" />
+            <span>Disable on this site</span>
+          </label>
+          <p id="hint-disable-site" class="hint">Pauses protection on the site you are viewing.</p>
+          <ul id="protect-exceptions" class="protect-exceptions" aria-label="Paused sites"></ul>
+        </div>
+      </section>
 
-      <p id="status" class="status" role="status" aria-live="polite">Ready.</p>
-      <p id="free-cleanup-note" class="note" hidden>Hidden-text cleanup is a Pro feature</p>
-      <!-- Filled only by main.ts, with createElement and textContent. -->
-      <ul id="hidden-text-findings" class="findings"></ul>
+      <section class="section" aria-labelledby="capture-title">
+        <h2 id="capture-title" class="section-title">Capture</h2>
+        <p id="tip-capture" class="tip" hidden>
+          <span>First capture: drag an area, or take the part of the page you can see.</span>
+          <button type="button" class="text-link" data-hint-key="hintCaptureSeen">Got it</button>
+        </p>
+        <div class="with-shortcut">
+          <button id="capture-area" type="button" class="btn" aria-describedby="hint-capture-area">
+            <span class="btn-label">Capture area</span>
+          </button>
+          <div class="shortcut-slot" data-command="capture-area" data-for="capture-area" data-action="Capture area"></div>
+        </div>
+        <p id="hint-capture-area" class="hint">Drag a rectangle on the page. Press Esc to cancel.</p>
+        <div class="custom-size">
+          <span class="custom-label" id="custom-size-label">Custom size</span>
+          <p id="hint-custom-size" class="hint">Capture a fixed width and height where you click.</p>
+          <div class="size-inputs">
+            <label class="size-field">
+              <span>Width</span>
+              <input
+                id="custom-width"
+                type="number"
+                min="16"
+                max="8000"
+                step="1"
+                inputmode="numeric"
+                aria-label="Width in pixels"
+                aria-describedby="hint-custom-size"
+              />
+            </label>
+            <label class="size-field">
+              <span>Height</span>
+              <input
+                id="custom-height"
+                type="number"
+                min="16"
+                max="8000"
+                step="1"
+                inputmode="numeric"
+                aria-label="Height in pixels"
+                aria-describedby="hint-custom-size"
+              />
+            </label>
+          </div>
+          <button id="capture-custom-size" type="button" class="btn" aria-describedby="hint-custom-size">
+            <span class="btn-label">Capture custom size</span>
+          </button>
+        </div>
+        <button id="capture-screenshot" type="button" class="btn btn-primary" aria-describedby="hint-capture-visible">
+          <span class="btn-label">Capture visible area</span>
+        </button>
+        <p id="hint-capture-visible" class="hint">Copies what you can see, so you can paste it.</p>
+        <p id="quota-line" class="quota">Checking plan…</p>
+        <p id="free-cleanup-note" class="note" hidden>Hidden-text cleanup is a Pro feature. Upgrade to include it.</p>
+      </section>
+
+      <section class="section" aria-labelledby="tools-title">
+        <h2 id="tools-title" class="section-title">Tools</h2>
+        <p id="tip-tools" class="tip" hidden>
+          <span>First time: Auto Scan covers keys and cards. Manual picker covers one spot you click.</span>
+          <button type="button" class="text-link" data-hint-key="hintToolsSeen">Got it</button>
+        </p>
+        <div class="with-shortcut">
+          <button id="toggle-picker" type="button" class="btn" aria-describedby="hint-picker" aria-label="Manual picker">
+            Manual picker: off
+          </button>
+        </div>
+        <p id="hint-picker" class="hint">Click one piece of text on the page to cover it.</p>
+        <button id="detect-hidden-text" type="button" class="btn" aria-describedby="hint-hidden" aria-label="Show Hidden Text">
+          <span class="btn-label">Show Hidden Text</span>
+        </button>
+        <p id="hint-hidden" class="hint">Lists text this page is hiding, using the same checks as Protect all sites. The instruction mark is a best guess, not a guarantee.</p>
+        <div class="with-shortcut">
+          <button id="scan-and-mask" type="button" class="btn" aria-describedby="hint-scan" aria-label="Auto Scan and Mask">
+            <span class="btn-label">Auto Scan and Mask</span>
+          </button>
+          <div class="shortcut-slot" data-command="quick-mask" data-for="scan-and-mask" data-action="Auto Scan and Mask"></div>
+        </div>
+        <p id="hint-scan" class="hint">Finds keys and card numbers on this page and covers them.</p>
+        <button id="clear-masks" type="button" class="btn" aria-describedby="hint-clear" aria-label="Clear Masks">
+          <span class="btn-label">Clear Masks</span>
+        </button>
+        <p id="hint-clear" class="hint">Removes covers from this page so the text shows again.</p>
+      </section>
+
+      <section class="section" aria-labelledby="settings-title">
+        <h2 id="settings-title" class="section-title">Settings</h2>
+        <label class="field" for="mask-style">
+          <span>Mask style</span>
+          <select id="mask-style" aria-describedby="hint-style">
+            <option value="black">Solid black</option>
+            <option value="blur">Blur</option>
+          </select>
+        </label>
+        <p id="hint-style" class="hint">Chooses a solid cover or a blur for new masks.</p>
+      </section>
+
+      <p id="status" class="status" role="status" aria-live="polite" aria-atomic="true">Loading…</p>
 
       <section id="upgrade-panel" class="upgrade" hidden aria-labelledby="upgrade-title">
         <h2 id="upgrade-title">Upgrade to DOMGuard Pro</h2>
         <ul class="upgrade-points">
           <li>Automatic sensitive data scan</li>
           <li>Hidden text protection for AI screenshots</li>
-          <li>Unlimited safe screenshots</li>
+          <li>Unlimited screenshots</li>
         </ul>
         <p class="price">$4.99 one-time. No subscription.</p>
         <div class="upgrade-actions">
-          <button id="upgrade" type="button" class="btn btn-primary">Upgrade</button>
-          <button id="upgrade-dismiss" type="button" class="btn">Not now</button>
+          <button id="upgrade" type="button" class="btn btn-primary" aria-label="Upgrade to Pro">Upgrade</button>
+          <button id="upgrade-dismiss" type="button" class="btn" aria-label="Dismiss upgrade">Not now</button>
         </div>
         <p class="fine">Payments are handled securely by ExtensionPay and Stripe.</p>
       </section>
+
+      <details class="shortcuts-fold">
+        <summary id="shortcuts-title">Keyboard shortcuts</summary>
+        <p class="hint">These keys run an action while Chrome is the front window. Not set means you choose the keys.</p>
+        <ul id="shortcut-list" class="shortcut-list" aria-label="Keyboard shortcuts"></ul>
+        <button id="change-shortcuts" type="button" class="btn">Change shortcuts</button>
+      </details>
 
       <div class="footer">
         <p>All processing happens locally. No data is collected.</p>

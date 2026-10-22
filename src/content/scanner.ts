@@ -43,6 +43,9 @@ export const GUARD_SELECTOR = `[${GUARD_ATTRIBUTE}]`;
 let skipCache = new WeakMap<Element, boolean>();
 let hiddenCache = new WeakMap<Element, boolean>();
 
+/** Null means every pattern. An empty set means pattern hits are off. */
+let enabledPatternIds: ReadonlySet<string> | null = null;
+
 /** True for our own overlays and for elements whose text is not content. */
 function isSkippedSubtree(element: Element | null): boolean {
   if (!element) {
@@ -105,14 +108,25 @@ function elementRects(element: Element): DOMRect[] {
   return Array.from(element.getClientRects(), toDocumentRect);
 }
 
-function collectTextNodes(): Text[] {
+function collectTextNodes(limit = Number.POSITIVE_INFINITY, root: Node | null = document.body): Text[] {
   const nodes: Text[] = [];
-  if (!document.body) {
+  if (!root) {
+    return nodes;
+  }
+  if (root instanceof Text) {
+    const text = root.nodeValue;
+    if (text && text.trim().length > 0 && !isSkippedSubtree(root.parentElement)) {
+      nodes.push(root);
+    }
+    return nodes;
+  }
+  const scope = root instanceof Document ? root.body : root;
+  if (!scope) {
     return nodes;
   }
   // Only cheap checks belong here; style and layout work happens per batch so
   // that collecting the candidates cannot itself stall the page.
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+  const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT, {
     acceptNode: (node) => {
       const text = node.nodeValue;
       if (!text || text.trim().length === 0) {
@@ -123,15 +137,25 @@ function collectTextNodes(): Text[] {
         : NodeFilter.FILTER_ACCEPT;
     },
   });
-  while (walker.nextNode()) {
+  while (nodes.length < limit && walker.nextNode()) {
     nodes.push(walker.currentNode as Text);
   }
   return nodes;
 }
 
-function collectFields(): (HTMLInputElement | HTMLTextAreaElement)[] {
+export function collectTextNodesUnder(root: Node, limit: number): Text[] {
+  skipCache = new WeakMap();
+  return collectTextNodes(limit, root);
+}
+
+function collectFields(root: ParentNode = document): (HTMLInputElement | HTMLTextAreaElement)[] {
   const fields: (HTMLInputElement | HTMLTextAreaElement)[] = [];
-  for (const element of document.querySelectorAll('input, textarea')) {
+  const elements: Element[] = [];
+  if (root instanceof Element && (root instanceof HTMLInputElement || root instanceof HTMLTextAreaElement)) {
+    elements.push(root);
+  }
+  elements.push(...root.querySelectorAll('input, textarea'));
+  for (const element of elements) {
     if (element.closest(GUARD_SELECTOR)) {
       continue;
     }
@@ -151,7 +175,7 @@ function scanTextNode(node: Text, into: PageMatch[]): void {
   }
   // TODO: matches split across sibling nodes (e.g. a card number wrapped in
   // <span>s) are not detected yet; that needs a flattened per-block text buffer.
-  for (const match of findSensitive(text)) {
+  for (const match of findSensitive(text, enabledPatternIds ?? undefined)) {
     const range = rangeForText(node, match.start, match.end);
     if (!range) {
       continue;
@@ -180,7 +204,7 @@ function scanField(field: HTMLInputElement | HTMLTextAreaElement, into: PageMatc
     return;
   }
 
-  const matches = findSensitive(field.value);
+  const matches = findSensitive(field.value, enabledPatternIds ?? undefined);
   if (matches.length === 0) {
     return;
   }
@@ -234,9 +258,36 @@ async function processInBatches<T>(
 export async function scanPage(): Promise<PageMatch[]> {
   skipCache = new WeakMap();
   hiddenCache = new WeakMap();
+  enabledPatternIds = null;
 
   const matches: PageMatch[] = [];
   await processInBatches(collectTextNodes(), (node) => scanTextNode(node, matches));
   await processInBatches(collectFields(), (field) => scanField(field, matches));
+  return matches;
+}
+
+export function collectFieldsUnder(root: ParentNode): (HTMLInputElement | HTMLTextAreaElement)[] {
+  return collectFields(root);
+}
+
+/**
+ * Scan an already collected batch. Password fields are masked whole and their
+ * values are not read. `patternIds` null keeps every pattern.
+ */
+export function scanCollected(
+  nodes: readonly Text[],
+  fields: readonly (HTMLInputElement | HTMLTextAreaElement)[],
+  patternIds: ReadonlySet<string> | null,
+): PageMatch[] {
+  skipCache = new WeakMap();
+  hiddenCache = new WeakMap();
+  enabledPatternIds = patternIds;
+  const matches: PageMatch[] = [];
+  for (const node of nodes) {
+    scanTextNode(node, matches);
+  }
+  for (const field of fields) {
+    scanField(field, matches);
+  }
   return matches;
 }

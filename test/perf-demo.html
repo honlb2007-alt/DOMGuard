@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>DOMGuard protect performance demo</title>
+  <style>
+    body { margin: 24px; font: 16px/1.4 "Segoe UI", system-ui, sans-serif; color: #101114; background: #f4f1ea; }
+    h1 { font-size: 22px; margin: 0 0 8px; }
+    #summary { white-space: pre-wrap; background: #fff; border: 1px solid #d9d3c5; padding: 12px; }
+    #pile { height: 240px; overflow: auto; background: #fff; border: 1px solid #d9d3c5; }
+  </style>
+</head>
+<body>
+  <h1>Protect performance demo</h1>
+  <p>About 20,000 ordinary rows, then a steady trickle of text changes. Numbers below come from the development build.</p>
+  <div id="summary">Building the page…</div>
+  <div id="pile"></div>
+  <script>
+    if (!window.chrome || !chrome.storage || !chrome.storage.local) {
+      const stored = { protectAll: true, protectHideText: true, protectDisabledHosts: [] };
+      window.chrome = {
+        storage: {
+          local: {
+            get: function () { return Promise.resolve(stored); },
+          },
+          onChanged: { addListener: function () {} },
+        },
+        runtime: {
+          id: 'domguard-perf-demo',
+          sendMessage: function () { return Promise.resolve({ ok: true }); },
+          onMessage: { addListener: function () {} },
+        },
+      };
+    }
+  </script>
+  <script src="../dist-dev/protect-all.js"></script>
+  <script>
+    const pile = document.getElementById('pile');
+    const fragment = document.createDocumentFragment();
+    for (let index = 0; index < 20000; index += 1) {
+      const row = document.createElement('div');
+      row.textContent = 'Visible note ' + index + ' stays readable on the performance page.';
+      fragment.append(row);
+    }
+    pile.append(fragment);
+
+    let cursor = 0;
+    window.setInterval(function () {
+      const row = pile.children[cursor % pile.children.length];
+      if (row) {
+        row.textContent = 'Visible note ' + cursor + ' updated for the steady change.';
+      }
+      cursor += 1;
+    }, 250);
+
+    const heapSamples = [];
+    function heap() {
+      const memory = performance.memory;
+      return memory ? memory.usedJSHeapSize : 0;
+    }
+
+    function field(line, name) {
+      const match = new RegExp(name + ':(-?[0-9.]+)').exec(line || '');
+      return match ? Number(match[1]) : 0;
+    }
+
+    const started = performance.now();
+    let firstSeen = 0;
+    const cpuAfter = [];
+    const timer = window.setInterval(function () {
+      const line = document.documentElement.getAttribute('data-domguard-dev') || '';
+      const first = field(line, 'first');
+      if (first > 0 && firstSeen === 0) {
+        firstSeen = first;
+      }
+      if (firstSeen > 0) {
+        cpuAfter.push(field(line, 'cpu'));
+      }
+      if (heap() > 0) {
+        heapSamples.push(heap());
+      }
+      if (performance.now() - started < 16000) {
+        return;
+      }
+      window.clearInterval(timer);
+      const recentHeap = heapSamples.slice(-5);
+      let stable = 'unknown';
+      if (recentHeap.length >= 2) {
+        const low = Math.min.apply(null, recentHeap);
+        const high = Math.max.apply(null, recentHeap);
+        stable = high < low * 1.15 ? 'yes' : 'no';
+      }
+      const recentCpu = cpuAfter.slice(-4);
+      const cpu = recentCpu.length === 0 ? 0 : recentCpu.reduce(function (sum, value) { return sum + value; }, 0) / recentCpu.length;
+      const lines = [
+        'nodes: ' + pile.children.length,
+        'first processing ms: ' + firstSeen,
+        'cpu after settle %: ' + cpu.toFixed(2),
+        'memory stable: ' + stable,
+        'heap samples: ' + heapSamples.join(','),
+        'engine: ' + (document.documentElement.getAttribute('data-domguard-dev') || 'missing'),
+      ];
+      document.getElementById('summary').textContent = lines.join('\n');
+    }, 500);
+  </script>
+</body>
+</html>

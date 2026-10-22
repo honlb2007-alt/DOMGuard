@@ -19,6 +19,11 @@ let frame = 0;
 let pointerX = 0;
 let pointerY = 0;
 
+/** A page script can dispatch clicks. Only a real user event may drive the picker. */
+export function acceptsPickerEvent(event: { isTrusted: boolean }): boolean {
+  return event.isTrusted === true;
+}
+
 /** The page's own inline cursor, restored verbatim when the picker stops. */
 let savedCursor: { value: string; priority: string } | null = null;
 
@@ -44,6 +49,9 @@ function drawHighlight(): void {
 }
 
 function onMouseMove(event: MouseEvent): void {
+  if (!acceptsPickerEvent(event)) {
+    return;
+  }
   pointerX = event.clientX;
   pointerY = event.clientY;
   if (!frame) {
@@ -53,12 +61,18 @@ function onMouseMove(event: MouseEvent): void {
 
 /** Swallow the event so the page never sees this interaction. */
 function blockEvent(event: Event): void {
+  if (!acceptsPickerEvent(event)) {
+    return;
+  }
   event.preventDefault();
   event.stopPropagation();
   event.stopImmediatePropagation();
 }
 
 function onClick(event: MouseEvent): void {
+  if (!acceptsPickerEvent(event)) {
+    return;
+  }
   blockEvent(event);
   const element = elementAt(event.clientX, event.clientY);
   if (!element) {
@@ -74,6 +88,9 @@ function onClick(event: MouseEvent): void {
 }
 
 function onKeyDown(event: KeyboardEvent): void {
+  if (!acceptsPickerEvent(event)) {
+    return;
+  }
   if (event.key === 'Escape') {
     blockEvent(event);
     stopPicker();
