@@ -4,7 +4,7 @@
 
 Date:
 
-Commit: fill in the hash after this tree is committed.
+Commit: `69e0c5f1e587aa8519f6dbacef2f0707554cdc9e`. Tag `v1.1.1` points at the commit that records this hash.
 
 Package: `domguard-1.1.1.zip`, 74371 bytes. SHA-256 `59B26C9FB1BFCE8E2C9AC6397033289CBBBC5B78AC9DCE65677D5C2CCDE623D5`.
 
