@@ -8,6 +8,7 @@ import {
   copiedToClipboardNote,
   dataUrlToPngBlob,
 } from '../shared/clipboard';
+import { settleChrome } from '../shared/chrome-settle';
 import type { CaptureRegionMessage, ExtensionResponse } from '../shared/messages';
 
 const MIN_DRAG_PX = 8;
@@ -266,7 +267,7 @@ function noteCopied(): void {
     return;
   }
   copyCounted = true;
-  void chrome.runtime.sendMessage({ type: 'COUNT_COPIED_SCREENSHOT' });
+  void settleChrome(chrome.runtime.sendMessage({ type: 'COUNT_COPIED_SCREENSHOT' }), undefined);
 }
 
 /**

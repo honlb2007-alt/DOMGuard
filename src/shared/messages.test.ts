@@ -54,6 +54,12 @@ describe('parseExtensionMessage', () => {
     expect(parseExtensionMessage({ type: 'ENABLE_PROTECT_ALL', paid: true })).toEqual({
       type: 'ENABLE_PROTECT_ALL',
     });
+    expect(parseExtensionMessage({ type: 'OPEN_UPGRADE' })).toEqual({
+      type: 'OPEN_UPGRADE',
+    });
+    expect(parseExtensionMessage({ type: 'OPEN_LOGIN', email: 'person@example.com' })).toEqual({
+      type: 'OPEN_LOGIN',
+    });
     expect(parseExtensionMessage({ type: 'DISABLE_PROTECT_ALL' })).toEqual({
       type: 'DISABLE_PROTECT_ALL',
     });
@@ -101,8 +107,17 @@ describe('parseExtensionMessage', () => {
     expect(parseExtensionMessage({ style: 'black' })).toBeNull();
   });
 
+  it('accepts OPEN_LOGIN with no fields and rejects a missing or unknown type', () => {
+    expect(parseExtensionMessage({ type: 'OPEN_LOGIN' })).toEqual({ type: 'OPEN_LOGIN' });
+    expect(parseExtensionMessage({ type: 'OPEN_LOGIN', email: 'person@example.com' })).toEqual({
+      type: 'OPEN_LOGIN',
+    });
+    expect(parseExtensionMessage({})).toBeNull();
+    expect(parseExtensionMessage({ type: 'OPEN_SIGN_IN' })).toBeNull();
+  });
   it('rejects a type that is not on the list', () => {
     expect(parseExtensionMessage({ type: 'RUN_SCAN' })).toBeNull();
+    expect(parseExtensionMessage({ type: 'OPEN_SIGN_IN' })).toBeNull();
     expect(parseExtensionMessage({ type: '' })).toBeNull();
   });
 

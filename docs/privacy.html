@@ -70,7 +70,7 @@
     <p>ExtensionPay saves a user record (including email and payment status), an API key, and the install time in the browser’s chrome.storage.sync, under extensionpay_user, extensionpay_api_key, and extensionpay_installed_at. This is ExtensionPay’s own behavior. For information about its privacy, see <a href="https://extensionpay.com/">extensionpay.com</a>.</p>
 
     <h2>Saved on this device</h2>
-    <p>DOMGuard writes the following to chrome.storage.local. Pro status is cached in memory only and is not written to disk.</p>
+    <p>DOMGuard writes the following to chrome.storage.local. A short-lived paid flag stays in memory. The purchase record below stores only that a check said paid, and when.</p>
     <ul>
       <li>domguardScreenshotQuota — the local date and the count of free screenshots copied that day.</li>
       <li>maskStyle — solid black or blurred.</li>
@@ -81,6 +81,7 @@
       <li>maskApiKeys, maskCards, maskEmails, maskPhones — which kinds of sensitive data are selected. Emails and phone numbers start off.</li>
       <li>protectDisabledHosts — hostnames of sites you paused.</li>
       <li>customCaptureWidth, customCaptureHeight — the last width and height, in pixels, entered for a custom-size capture.</li>
+      <li>domguardPurchaseVerified — paid set to true, and verifiedAt, the time ExtensionPay last confirmed this install was paid. No email is stored. Removed only when ExtensionPay reports paid as false.</li>
       <li>hintProtectSeen, hintCaptureSeen, hintToolsSeen — whether you dismissed the first-use tips.</li>
     </ul>
 

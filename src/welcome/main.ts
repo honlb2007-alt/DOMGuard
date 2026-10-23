@@ -17,6 +17,7 @@ import {
   MASK_STYLE_KEY,
   maskSelectionFrom,
 } from '../content/protect-decision';
+import { settleChrome } from '../shared/chrome-settle';
 import { scanPage } from '../content/scanner';
 import { welcomeTryAction } from './try-plan';
 
@@ -73,7 +74,7 @@ document.getElementById('change-shortcuts')?.addEventListener('click', (event) =
   if (!event.isTrusted) {
     return;
   }
-  void chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
+  void settleChrome(chrome.tabs.create({ url: 'chrome://extensions/shortcuts' }), undefined);
 });
 
 async function confirmPro(): Promise<boolean | null> {

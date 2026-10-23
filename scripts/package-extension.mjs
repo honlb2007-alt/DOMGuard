@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const distDir = path.join(root, 'dist');
-const zipPath = path.join(root, 'domguard-1.1.0.zip');
+const zipPath = path.join(root, 'domguard-1.1.1.zip');
 
 const CRC_TABLE = (() => {
   const table = new Uint32Array(256);

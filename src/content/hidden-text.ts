@@ -16,11 +16,14 @@ import {
 } from './hidden-review-plan';
 import {
   contrastOn,
+  isVisualHideTechnique,
   judgeBackground,
   shouldProtectHide,
+  textForHideCheck,
   type BackgroundJudgement,
   type BackgroundLayer,
 } from './protect-decision';
+import { MAX_TEXT_SCAN_CHARS_PER_NODE } from '../shared/text-budget';
 import {
   classifyCandidate,
   CONTRAST_HIDE_BELOW,
@@ -71,11 +74,17 @@ const hiddenLengths = new Map<HTMLElement | SVGElement, number>();
 function ownText(element: Element): string {
   let text = '';
   for (const node of element.childNodes) {
-    if (node.nodeType === Node.TEXT_NODE) {
-      text += node.nodeValue ?? '';
+    if (node.nodeType !== Node.TEXT_NODE) {
+      continue;
     }
+    if (text.length >= MAX_TEXT_SCAN_CHARS_PER_NODE) {
+      break;
+    }
+    const value = node.nodeValue ?? '';
+    const room = MAX_TEXT_SCAN_CHARS_PER_NODE - text.length;
+    text += value.length > room ? value.slice(0, room) : value;
   }
-  return text.trim();
+  return textForHideCheck(text);
 }
 
 function toPreview(text: string): string {
@@ -312,7 +321,14 @@ function classify(
   }
 
   const clipsOverflow = style.overflowX !== 'visible' || style.overflowY !== 'visible';
-  if (reason === null && (rect.width === 0 || rect.height === 0) && clipsOverflow) {
+  const fullyClipped = isFullyClipped(style);
+  const visualHide = isVisualHideTechnique({
+    fullyClipped,
+    width: rect.width,
+    height: rect.height,
+    overflowHidden: clipsOverflow,
+  });
+  if (reason === null && (rect.width === 0 || rect.height === 0) && clipsOverflow && !visualHide) {
     reason = 'zero_size';
   }
 
@@ -320,8 +336,18 @@ function classify(
     reason = 'offscreen';
   }
 
-  if (reason === null && isFullyClipped(style)) {
+  if (reason === null && fullyClipped) {
     reason = 'clipped';
+  }
+
+  if (
+    reason === null &&
+    visualHide &&
+    clipsOverflow &&
+    rect.width <= 1 &&
+    rect.height <= 1
+  ) {
+    reason = 'zero_size';
   }
 
   if (
@@ -331,6 +357,7 @@ function classify(
       interactive: isInteractive(element),
       backgroundReliable: background.reliable,
       minLength,
+      visualHide,
     })
   ) {
     return null;

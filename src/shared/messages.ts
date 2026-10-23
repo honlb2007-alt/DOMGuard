@@ -129,6 +129,11 @@ export interface OpenUpgradeMessage {
   type: 'OPEN_UPGRADE';
 }
 
+/** Open ExtensionPay's sign-in page. No fields. For an install that is not Pro yet. */
+export interface OpenLoginMessage {
+  type: 'OPEN_LOGIN';
+}
+
 /** Sent by the service worker after a payment. Not a popup request. */
 export interface ProStatusChangedMessage {
   type: 'PRO_STATUS_CHANGED';
@@ -157,7 +162,8 @@ export type ExtensionMessage =
   | NoteProtectTripMessage
   | CheckProMessage
   | GetStatusMessage
-  | OpenUpgradeMessage;
+  | OpenUpgradeMessage
+  | OpenLoginMessage;
 
 export type MessageType = ExtensionMessage['type'];
 
@@ -267,13 +273,24 @@ export interface QuotaStatus {
   limit: number;
 }
 
+export type PurchaseCheck = 'paid' | 'unpaid' | 'unavailable';
+
 export interface GetStatusResponse {
   ok: true;
+  /** Feature access. True during an offline grace window as well as when ExtensionPay says paid. */
   paid: boolean;
   quota: QuotaStatus;
+  /** `unavailable` means the ExtensionPay request failed, which is not an explicit unpaid answer. */
+  purchaseCheck: PurchaseCheck;
+  /** True only when `purchaseCheck` is `unavailable` and the local grace record is still inside 7 days. */
+  offlineGrace: boolean;
 }
 
 export interface OpenUpgradeResponse {
+  ok: true;
+}
+
+export interface OpenLoginResponse {
   ok: true;
 }
 
@@ -307,6 +324,7 @@ export interface SuccessResponseMap {
   CHECK_PRO: CheckProResponse;
   GET_STATUS: GetStatusResponse;
   OPEN_UPGRADE: OpenUpgradeResponse;
+  OPEN_LOGIN: OpenLoginResponse;
 }
 
 /** Any response a given message type can produce. */
@@ -322,6 +340,7 @@ export const BACKGROUND_MESSAGE_TYPES = [
   'CHECK_PRO',
   'GET_STATUS',
   'OPEN_UPGRADE',
+  'OPEN_LOGIN',
   'ENABLE_PROTECT_ALL',
   'DISABLE_PROTECT_ALL',
   'GET_PROTECT_ALL',
@@ -463,6 +482,8 @@ export function parseExtensionMessage(raw: unknown): ExtensionMessage | null {
       return { type: 'GET_STATUS' };
     case 'OPEN_UPGRADE':
       return { type: 'OPEN_UPGRADE' };
+    case 'OPEN_LOGIN':
+      return { type: 'OPEN_LOGIN' };
     default:
       return null;
   }

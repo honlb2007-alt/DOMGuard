@@ -58,6 +58,7 @@ import {
   type EdgeClock,
   type EngineLimits,
 } from './protect-realtime';
+import { settleChrome } from '../shared/chrome-settle';
 import { parseExtensionMessage, type HiddenReason } from '../shared/messages';
 
 const RUNNING_FLAG = '__DOMGUARD_PROTECT_ALL__';
@@ -1233,7 +1234,7 @@ function listen(): void {
     ) {
       return;
     }
-    void refreshFromStorage();
+    void settleChrome(refreshFromStorage(), undefined);
   });
   chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
     if (sender.id !== chrome.runtime.id) {
@@ -1251,7 +1252,7 @@ function listen(): void {
 
 function boot(): void {
   const attach = (): void => {
-    void refreshFromStorage();
+    void settleChrome(refreshFromStorage(), undefined);
   };
   if (document.documentElement) {
     attach();

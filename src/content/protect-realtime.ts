@@ -1,6 +1,12 @@
 // Pure decisions for the real-time Protect all sites engine. No DOM, no I/O.
 
-import { ALL_SITES_MIN_TEXT_LENGTH, matchesInstructionPhrase } from './protect-decision';
+import {
+  ALL_SITES_MIN_TEXT_LENGTH,
+  isVisualHideTechnique,
+  matchesInstructionPhrase,
+  textForHideCheck,
+  VISUAL_HIDE_MAX_PX,
+} from './protect-decision';
 import type { HiddenReason } from '../shared/messages';
 
 /** Certain hides: a person cannot be reading this text. */
@@ -97,17 +103,33 @@ export function classifyCandidate(facts: CandidateFacts): CandidateDecision {
   ) {
     return NONE;
   }
-  const text = facts.text.trim();
-  if (text.length < ALL_SITES_MIN_TEXT_LENGTH && !matchesInstructionPhrase(text)) {
+  const text = textForHideCheck(facts.text);
+  const phrase = matchesInstructionPhrase(text);
+  if (text.length < ALL_SITES_MIN_TEXT_LENGTH && !phrase) {
     return NONE;
   }
+  const visualHide = isVisualHideTechnique({
+    fullyClipped: facts.fullyClipped,
+    width: facts.width,
+    height: facts.height,
+    overflowHidden: facts.overflowHidden,
+  });
   if (Number.isFinite(facts.fontSizePx) && facts.fontSizePx < CERTAIN_FONT_BELOW_PX) {
     return { grade: 'A', reason: 'tiny_font' };
   }
-  if (facts.fullyClipped) {
+  if (facts.fullyClipped && phrase) {
     return { grade: 'A', reason: 'clipped' };
   }
-  if ((facts.width === 0 || facts.height === 0) && facts.overflowHidden) {
+  if ((facts.width === 0 || facts.height === 0) && facts.overflowHidden && !visualHide) {
+    return { grade: 'A', reason: 'zero_size' };
+  }
+  if (
+    phrase &&
+    facts.overflowHidden &&
+    facts.width <= VISUAL_HIDE_MAX_PX &&
+    facts.height <= VISUAL_HIDE_MAX_PX &&
+    !facts.fullyClipped
+  ) {
     return { grade: 'A', reason: 'zero_size' };
   }
   const farLeft = facts.rectRight < -FAR_OFFSCREEN_PX;
