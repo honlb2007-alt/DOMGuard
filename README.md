@@ -145,3 +145,7 @@ npm run package
 This builds `dist`, then writes `domguard-1.1.1.zip` in the project root. That zip is the Chrome Web Store package for version 1.1.1. It contains the files inside `dist`, with `manifest.json` at the archive root. Production builds do not emit source maps. `dist/`, `node_modules/`, and `privacy-site/` stay out of git. The privacy policy that matches this release is [docs/privacy.html](docs/privacy.html).
 
 Version 1.1.1 adds Restore purchase. While the plan shows Free, the upgrade panel and Settings open ExtensionPay's sign-in page. After signing in, reopen DOMGuard. The Protect all sites line now says the feature hides hidden text and masks the secrets you select, and that a screenshot or screen recording of the page shows those changes.
+
+## Copyright
+
+DOMGuard's own work is copyrighted by binlabs.studio. See [COPYRIGHT.md](COPYRIGHT.md). No open-source license is granted for that work. ExtPay remains under its own license.
