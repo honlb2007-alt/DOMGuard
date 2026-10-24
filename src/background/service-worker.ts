@@ -1,10 +1,12 @@
 import {
   clearProCache,
+  decidePurchase,
   extpay,
   getQuota,
   isPro,
   proAccess,
   consumeScreenshotQuota,
+  withExtpayTimeout,
 } from './entitlement';
 import {
   AUTO_MASK_KEY,
@@ -19,8 +21,10 @@ import {
   PROTECT_GRANT_NEEDED_KEY,
   PROTECT_HIDE_TEXT_KEY,
   BREAKER_BADGE_MS,
+  hostListAccepts,
   storedBool,
 } from '../content/protect-decision';
+import { settleChrome } from '../shared/chrome-settle';
 import { cleanScreenshot } from './pixel-clean';
 import { registeredScriptsMatch } from './protect-registration';
 import { computeCropRect } from '../shared/crop';
@@ -353,16 +357,32 @@ async function handleMessage(
       return removeProtectException(message.host);
     case 'CHECK_PRO':
       return { ok: true, isPro: await isPro() };
-    case 'GET_STATUS':
-      return { ok: true, paid: await isPro(), quota: await getQuota() };
+    case 'GET_STATUS': {
+      const purchase = await decidePurchase();
+      return {
+        ok: true,
+        paid: purchase.allowed,
+        quota: await getQuota(),
+        purchaseCheck: purchase.check,
+        offlineGrace: purchase.offlineGrace,
+      };
+    }
     case 'RESTORE_PROTECT_ALL':
       return { ok: true };
     case 'OPEN_UPGRADE':
       try {
-        await extpay.openPaymentPage();
+        await withExtpayTimeout(extpay.openPaymentPage());
         return { ok: true };
       } catch {
         return { ok: false, error: 'UPGRADE_UNAVAILABLE' };
+      }
+    case 'OPEN_LOGIN':
+      try {
+        await withExtpayTimeout(extpay.openLoginPage());
+        clearProCache();
+        return { ok: true };
+      } catch {
+        return { ok: false, error: 'LOGIN_UNAVAILABLE' };
       }
     case 'SANITIZE_BEFORE_CAPTURE':
       if (!(await isPro())) {
@@ -623,10 +643,13 @@ async function syncProtectScripts(): Promise<void> {
 }
 
 async function disableProtectAll(): Promise<void> {
-  await chrome.storage.local.set({
-    [PROTECT_ALL_KEY]: false,
-    [PROTECT_GRANT_NEEDED_KEY]: false,
-  });
+  await settleChrome(
+    chrome.storage.local.set({
+      [PROTECT_ALL_KEY]: false,
+      [PROTECT_GRANT_NEEDED_KEY]: false,
+    }),
+    undefined,
+  );
   await unregisterScript(PROTECT_ALL_SCRIPT_ID);
   await unregisterScript(AUTO_MASK_SCRIPT_ID);
   await notifyOpenTabs('RESTORE_PROTECT_ALL');
@@ -643,11 +666,11 @@ async function clearProtectRegistration(): Promise<void> {
 }
 
 async function enableProtectAll(): Promise<ResponseFor<'ENABLE_PROTECT_ALL'>> {
-  const access = await proAccess();
-  if (access === 'unavailable') {
-    return { ok: false, error: 'PRO_UNAVAILABLE' };
-  }
-  if (!(await isPro())) {
+  const purchase = await decidePurchase();
+  if (!purchase.allowed) {
+    if (purchase.check === 'unavailable') {
+      return { ok: false, error: 'PRO_UNAVAILABLE' };
+    }
     await maybeDropAllSitesPermission();
     return { ok: false, error: 'PRO_REQUIRED' };
   }
@@ -713,10 +736,13 @@ async function reconcileProtectAll(): Promise<void> {
     return;
   }
   if (!(await hasAllSitesPermission())) {
-    await chrome.storage.local.set({
-      [PROTECT_ALL_KEY]: false,
-      [PROTECT_GRANT_NEEDED_KEY]: false,
-    });
+    await settleChrome(
+      chrome.storage.local.set({
+        [PROTECT_ALL_KEY]: false,
+        [PROTECT_GRANT_NEEDED_KEY]: false,
+      }),
+      undefined,
+    );
     await unregisterScript(PROTECT_ALL_SCRIPT_ID);
     await unregisterScript(AUTO_MASK_SCRIPT_ID);
     await writeGlobalProtectBadge('off');
@@ -724,6 +750,8 @@ async function reconcileProtectAll(): Promise<void> {
   }
   const access = await proAccess();
   if (access === 'unavailable') {
+    // A failed check is not an explicit unpaid answer, including after the
+    // offline grace window. Leave the registered scripts in place.
     const settings = await readSettings();
     if (!(await registrationAgrees(settings))) {
       try {
@@ -757,16 +785,16 @@ async function toggleProtectFromCommand(): Promise<void> {
     await disableProtectAll();
     return;
   }
-  const access = await proAccess();
-  if (access === 'unavailable') {
+  const purchase = await decidePurchase();
+  if (!purchase.allowed) {
     return;
   }
-  if (!(await isPro())) {
-    return;
-  }
-  const granted = await chrome.permissions.contains({ origins: ['<all_urls>'] });
+  const granted = await settleChrome(
+    chrome.permissions.contains({ origins: ['<all_urls>'] }),
+    false,
+  );
   if (!granted) {
-    await chrome.storage.local.set({ [PROTECT_GRANT_NEEDED_KEY]: true });
+    await settleChrome(chrome.storage.local.set({ [PROTECT_GRANT_NEEDED_KEY]: true }), undefined);
     await writeGlobalProtectBadge('grant');
     return;
   }
@@ -800,7 +828,7 @@ async function flashToolbarBadge(text: string): Promise<void> {
   }
   proBadgeTimer = self.setTimeout(() => {
     proBadgeTimer = 0;
-    void restoreProtectBadge();
+    void settleChrome(restoreProtectBadge(), undefined);
   }, PRO_BADGE_MS);
 }
 
@@ -829,7 +857,7 @@ async function flashBreakerBadge(): Promise<void> {
   }
   breakerBadgeTimer = self.setTimeout(() => {
     breakerBadgeTimer = 0;
-    void restoreProtectBadge();
+    void settleChrome(restoreProtectBadge(), undefined);
   }, BREAKER_BADGE_MS);
 }
 
@@ -874,15 +902,15 @@ async function quickMaskFromCommand(): Promise<void> {
 
 chrome.commands.onCommand.addListener((command) => {
   if (command === 'toggle-protect') {
-    void toggleProtectFromCommand();
+    void settleChrome(toggleProtectFromCommand(), undefined);
     return;
   }
   if (command === 'quick-mask') {
-    void quickMaskFromCommand();
+    void settleChrome(quickMaskFromCommand(), undefined);
     return;
   }
   if (command === 'capture-area') {
-    void beginRegionCapture({ type: 'START_REGION_CAPTURE' });
+    void settleChrome(beginRegionCapture({ type: 'START_REGION_CAPTURE' }), undefined);
   }
 });
 
@@ -893,6 +921,9 @@ async function addProtectException(host: string): Promise<ResponseFor<'ADD_PROTE
   }
   const hosts = await readDisabledHosts();
   if (!hosts.includes(normalized)) {
+    if (!hostListAccepts(hosts, normalized)) {
+      return { ok: false, error: 'HOST_LIST_FULL' };
+    }
     hosts.push(normalized);
     await chrome.storage.local.set({ [PROTECT_DISABLED_HOSTS_KEY]: hosts });
   }
@@ -909,16 +940,32 @@ async function removeProtectException(host: string): Promise<ResponseFor<'REMOVE
   return protectAllState();
 }
 
+/** True when Chrome removed the optional all-sites grant these scripts need. */
+function removedAllSites(permissions: chrome.permissions.Permissions): boolean {
+  const origins = permissions.origins ?? [];
+  return origins.includes('<all_urls>') || origins.includes('*://*/*');
+}
+
+chrome.permissions.onRemoved.addListener((permissions) => {
+  if (!removedAllSites(permissions)) {
+    return;
+  }
+  void settleChrome(disableProtectAll(), undefined);
+});
+
 chrome.runtime.onStartup.addListener(() => {
-  void reconcileProtectAll();
+  void settleChrome(reconcileProtectAll(), undefined);
 });
 
 chrome.runtime.onInstalled.addListener((details) => {
-  void reconcileProtectAll();
+  void settleChrome(reconcileProtectAll(), undefined);
   if (details.reason !== 'install') {
     return;
   }
-  void chrome.tabs.create({ url: chrome.runtime.getURL('src/welcome/index.html') });
+  void settleChrome(
+    chrome.tabs.create({ url: chrome.runtime.getURL('src/welcome/index.html') }),
+    undefined,
+  );
 });
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {

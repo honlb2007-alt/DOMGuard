@@ -3,6 +3,7 @@
 // geometry leave this module — never the matched text itself.
 
 import { DEFAULT_MASK_TYPES, enabledPatternIds as idsForSelection, findSensitive } from '../shared/patterns';
+import { MAX_TEXT_NODE_LENGTH, planTextChunks, TEXT_CHUNK_OVERLAP } from '../shared/text-budget';
 
 /**
  * A live reference the masker can re-measure after the page changes. Text hits
@@ -115,7 +116,12 @@ function collectTextNodes(limit = Number.POSITIVE_INFINITY, root: Node | null = 
   }
   if (root instanceof Text) {
     const text = root.nodeValue;
-    if (text && text.trim().length > 0 && !isSkippedSubtree(root.parentElement)) {
+    if (
+      text &&
+      text.length <= MAX_TEXT_NODE_LENGTH &&
+      (text.length > 256 || text.trim().length > 0) &&
+      !isSkippedSubtree(root.parentElement)
+    ) {
       nodes.push(root);
     }
     return nodes;
@@ -129,7 +135,10 @@ function collectTextNodes(limit = Number.POSITIVE_INFINITY, root: Node | null = 
   const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT, {
     acceptNode: (node) => {
       const text = node.nodeValue;
-      if (!text || text.trim().length === 0) {
+      if (!text || text.length > MAX_TEXT_NODE_LENGTH) {
+        return NodeFilter.FILTER_REJECT;
+      }
+      if (text.length <= 256 && text.trim().length === 0) {
         return NodeFilter.FILTER_REJECT;
       }
       return isSkippedSubtree(node.parentElement)
@@ -168,15 +177,37 @@ function collectFields(root: ParentNode = document): (HTMLInputElement | HTMLTex
   return fields;
 }
 
-function scanTextNode(node: Text, into: PageMatch[]): void {
+const textChunkCursor = new WeakMap<Text, number>();
+
+/**
+ * Scan the next chunk of one text node. Returns true when a later call
+ * should take the following chunk. A node past the length limit is skipped.
+ */
+function scanTextNodeChunk(node: Text, into: PageMatch[]): boolean {
   const text = node.nodeValue;
-  if (!text || isDisplayNone(node.parentElement)) {
-    return;
+  if (!text || text.length > MAX_TEXT_NODE_LENGTH || isDisplayNone(node.parentElement)) {
+    textChunkCursor.delete(node);
+    return false;
   }
+  const plan = planTextChunks(text.length);
+  if (plan.skipped) {
+    textChunkCursor.delete(node);
+    return false;
+  }
+  const index = textChunkCursor.get(node) ?? 0;
+  if (index >= plan.chunks.length) {
+    textChunkCursor.delete(node);
+    return false;
+  }
+  const chunk = plan.chunks[index];
+  const slice = text.slice(chunk.start, chunk.end);
   // TODO: matches split across sibling nodes (e.g. a card number wrapped in
   // <span>s) are not detected yet; that needs a flattened per-block text buffer.
-  for (const match of findSensitive(text, enabledPatternIds ?? undefined)) {
-    const range = rangeForText(node, match.start, match.end);
+  for (const match of findSensitive(slice, enabledPatternIds ?? undefined)) {
+    if (index > 0 && match.end <= TEXT_CHUNK_OVERLAP) {
+      continue;
+    }
+    const range = rangeForText(node, chunk.start + match.start, chunk.start + match.end);
     if (!range) {
       continue;
     }
@@ -187,6 +218,13 @@ function scanTextNode(node: Text, into: PageMatch[]): void {
       target: { kind: 'range', range },
     });
   }
+  const next = index + 1;
+  if (next < plan.chunks.length) {
+    textChunkCursor.set(node, next);
+    return true;
+  }
+  textChunkCursor.delete(node);
+  return false;
 }
 
 function scanField(field: HTMLInputElement | HTMLTextAreaElement, into: PageMatch[]): void {
@@ -243,10 +281,10 @@ function nextBatch(): Promise<void> {
 
 async function processInBatches<T>(
   items: readonly T[],
-  handle: (item: T) => void,
+  handle: (item: T) => void | Promise<void>,
 ): Promise<void> {
   for (let index = 0; index < items.length; index += 1) {
-    handle(items[index]);
+    await handle(items[index]);
     const isBatchEnd = (index + 1) % BATCH_SIZE === 0;
     if (isBatchEnd && index + 1 < items.length) {
       await nextBatch();
@@ -266,7 +304,17 @@ export async function scanPage(
   enabledPatternIds = patternIds;
 
   const matches: PageMatch[] = [];
-  await processInBatches(collectTextNodes(), (node) => scanTextNode(node, matches));
+  await processInBatches(collectTextNodes(), async (node) => {
+    let more = true;
+    let step = 0;
+    while (more) {
+      if (step > 0) {
+        await nextBatch();
+      }
+      more = scanTextNodeChunk(node, matches);
+      step += 1;
+    }
+  });
   await processInBatches(collectFields(), (field) => scanField(field, matches));
   return matches;
 }
@@ -279,20 +327,27 @@ export function collectFieldsUnder(root: ParentNode): (HTMLInputElement | HTMLTe
  * Scan an already collected batch. Password fields are masked whole and their
  * values are not read. `patternIds` null keeps every pattern.
  */
+/**
+ * One chunk per text node. Nodes that still have chunks are returned so the
+ * caller can scan them on a later turn instead of in this call.
+ */
 export function scanCollected(
   nodes: readonly Text[],
   fields: readonly (HTMLInputElement | HTMLTextAreaElement)[],
   patternIds: ReadonlySet<string> | null,
-): PageMatch[] {
+): { matches: PageMatch[]; pendingText: Text[] } {
   skipCache = new WeakMap();
   hiddenCache = new WeakMap();
   enabledPatternIds = patternIds;
   const matches: PageMatch[] = [];
+  const pendingText: Text[] = [];
   for (const node of nodes) {
-    scanTextNode(node, matches);
+    if (scanTextNodeChunk(node, matches)) {
+      pendingText.push(node);
+    }
   }
   for (const field of fields) {
     scanField(field, matches);
   }
-  return matches;
+  return { matches, pendingText };
 }

@@ -1,5 +1,13 @@
 # DOMGuard store listing draft (v1.1)
 
+## What's new in 1.1.1
+
+Paste this into the store version description:
+
+Restore a purchase from the upgrade panel, or from Settings while the plan says Free. Sign in with the email from checkout, then reopen DOMGuard. If the purchase check cannot connect, Pro stays available for 7 days after the last confirmation. Protect all sites hides hidden text and masks the secrets you select. A screenshot or screen recording of the page shows those changes.
+
+Do not write a reply-time promise, a refund policy, "guarantee", "everywhere", or "any app".
+
 Checked against `src/` on October 22, 2026. Sentences that the code does not support are not left as claims. Each one is marked `[MISMATCH: ...]`.
 
 Title:
@@ -102,7 +110,7 @@ DOMGuard helps users hide sensitive information and hidden text on web pages bef
 
 - activeTab: Used to capture a screenshot of the visible area of the current tab and to run DOMGuard on the current page only after the user clicks the extension or uses a shortcut.
 - scripting: Used to inject DOMGuard's scanning and masking code into the current tab on demand, after the user clicks the extension or uses a shortcut. After Protect all sites is turned on, the same permission registers `protect-all.js` and `automask.js` for later visits.
-- storage: Used to store settings and the daily free screenshot count in `chrome.storage.local`: `domguardScreenshotQuota` (local date and count), `maskStyle`, `protectAll`, `protectGrantNeeded`, `protectHideText`, `autoMask`, `maskApiKeys`, `maskCards`, `maskEmails`, `maskPhones`, `protectDisabledHosts` (hostnames), `customCaptureWidth`, `customCaptureHeight` (the last custom capture size in pixels), `hintProtectSeen`, `hintCaptureSeen`, and `hintToolsSeen`. The ExtensionPay library uses `chrome.storage.sync` for `extensionpay_user`, `extensionpay_api_key`, and `extensionpay_installed_at`.
+- storage: Used to store settings and the daily free screenshot count in `chrome.storage.local`: `domguardScreenshotQuota` (local date and count), `maskStyle`, `protectAll`, `protectGrantNeeded`, `protectHideText`, `autoMask`, `maskApiKeys`, `maskCards`, `maskEmails`, `maskPhones`, `protectDisabledHosts` (hostnames), `customCaptureWidth`, `customCaptureHeight` (the last custom capture size in pixels), `domguardPurchaseVerified` (`paid` set to true, and `verifiedAt`; no email; removed only when ExtensionPay reports `paid` as false), `hintProtectSeen`, `hintCaptureSeen`, and `hintToolsSeen`. The ExtensionPay library uses `chrome.storage.sync` for `extensionpay_user`, `extensionpay_api_key`, and `extensionpay_installed_at`.
 - Host permission https://extensionpay.com/*: Used only to check Pro purchase status and open the payment page through ExtensionPay. A small content script runs only on extensionpay.com so the extension can detect that a payment was completed. It does not run on any other website.
 - Optional host permission (all sites): Requested only when a paid user turns on Protect all sites. A free click opens the upgrade panel and does not call `chrome.permissions.request`. The grant lets DOMGuard hide hidden text and mask sensitive data on pages the user visits, so the user does not have to enable it on each page. Everything is processed locally in the browser. The permission is not requested at install time. Turning the feature off removes `<all_urls>` when neither hidden-text hiding nor automatic masking still needs it.
 

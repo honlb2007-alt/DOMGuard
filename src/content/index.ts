@@ -166,6 +166,7 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
     case 'CHECK_PRO':
     case 'GET_STATUS':
     case 'OPEN_UPGRADE':
+    case 'OPEN_LOGIN':
     case 'ENABLE_PROTECT_ALL':
     case 'DISABLE_PROTECT_ALL':
     case 'GET_PROTECT_ALL':

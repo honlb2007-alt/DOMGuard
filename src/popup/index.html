@@ -12,7 +12,7 @@
         <h1>DOMGuard</h1>
         <div class="header-actions">
           <button id="open-help" type="button" class="text-link">Help</button>
-          <span id="plan-badge" class="badge">…</span>
+          <span id="plan-badge" class="badge">Free</span>
         </div>
       </header>
 
@@ -32,7 +32,7 @@
         </div>
         <p id="hint-protect-all" class="hint">Covers every site you visit until you turn it off.</p>
         <p id="protect-state" class="hint" hidden></p>
-        <p class="hint">Covers the page while you take a screenshot.</p>
+        <p class="hint">Hides hidden text and masks the secrets you select. A screenshot or screen recording of the page shows those changes.</p>
         <div id="protect-options" class="protect-options" hidden>
           <label class="protect-toggle" for="protect-hide-text">
             <input id="protect-hide-text" type="checkbox" checked aria-describedby="hint-hide-text" />
@@ -172,9 +172,13 @@
           </select>
         </label>
         <p id="hint-style" class="hint">Chooses a solid cover or a blur for new masks.</p>
+        <p id="restore-purchase-settings" class="hint" hidden>
+          <button id="restore-purchase-settings-button" type="button" class="text-link">Restore purchase</button>
+        </p>
       </section>
 
-      <p id="status" class="status" role="status" aria-live="polite" aria-atomic="true">Loading…</p>
+      <p id="status" class="status" role="status" aria-live="polite" aria-atomic="true">Checking your purchase…</p>
+      <button id="retry-purchase" type="button" class="text-link retry-purchase" hidden>Try again</button>
 
       <section id="upgrade-panel" class="upgrade" hidden aria-labelledby="upgrade-title">
         <h2 id="upgrade-title">Upgrade to DOMGuard Pro</h2>
@@ -188,6 +192,7 @@
           <button id="upgrade" type="button" class="btn btn-primary" aria-label="Upgrade to Pro">Upgrade</button>
           <button id="upgrade-dismiss" type="button" class="btn" aria-label="Dismiss upgrade">Not now</button>
         </div>
+        <p class="fine">Already paid? <button id="restore-purchase" type="button" class="text-link">Restore purchase</button></p>
         <p class="fine">Payments are handled securely by ExtensionPay and Stripe.</p>
       </section>
 

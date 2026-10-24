@@ -3,6 +3,7 @@
 import { parseColor, relativeLuminance, type Rgba } from './contrast';
 import { INSTRUCTION_PHRASES } from '../shared/instruction';
 import { DEFAULT_MASK_TYPES, type MaskTypeSelection } from '../shared/patterns';
+import { MAX_TEXT_SCAN_CHARS_PER_NODE } from '../shared/text-budget';
 
 export { INSTRUCTION_PHRASES };
 
@@ -11,6 +12,12 @@ export const MIN_PROTECT_TEXT_LENGTH = 20;
 
 /** Stricter floor used only by Protect all sites. */
 export const ALL_SITES_MIN_TEXT_LENGTH = 40;
+
+/** Paused-site list. A new hostname is refused once the list reaches this size. */
+export const MAX_EXCLUDED_HOSTS = 500;
+
+/** A box this small, with overflow hidden, is the usual sr-only / visually-hidden trick. */
+export const VISUAL_HIDE_MAX_PX = 1;
 
 /** Boolean in chrome.storage.local. Nothing from the page is stored with it. */
 export const PROTECT_ALL_KEY = 'protectAll';
@@ -134,6 +141,11 @@ export interface ProtectHideInput {
   backgroundReliable: boolean;
   /** Defaults to the scan/screenshot floor. Protect all sites passes 40. */
   minLength?: number;
+  /**
+   * The element uses a screen-reader clip or a 1px overflow box.
+   * Those reasons then require an instruction phrase.
+   */
+  visualHide?: boolean;
 }
 
 /** One ancestor's painted backdrop, from the text element outward. */
@@ -179,8 +191,36 @@ export function judgeBackground(
   return { reliable: false, source: 'no-opaque', color: null };
 }
 
+/** Clip, inset, or a 1px overflow box. Ordinary tiny type and off-screen text are not this. */
+export function isVisualHideTechnique(input: {
+  fullyClipped: boolean;
+  width: number;
+  height: number;
+  overflowHidden: boolean;
+}): boolean {
+  if (input.fullyClipped) {
+    return true;
+  }
+  return (
+    input.width <= VISUAL_HIDE_MAX_PX &&
+    input.height <= VISUAL_HIDE_MAX_PX &&
+    input.overflowHidden
+  );
+}
+
+/**
+ * Prefix only. Trim and case-folding stay on this slice so a huge node is
+ * not walked more than once.
+ */
+export function textForHideCheck(text: string): string {
+  if (text.length <= MAX_TEXT_SCAN_CHARS_PER_NODE) {
+    return text.trim();
+  }
+  return text.slice(0, MAX_TEXT_SCAN_CHARS_PER_NODE).trim();
+}
+
 export function matchesInstructionPhrase(text: string): boolean {
-  const folded = text.toLowerCase();
+  const folded = textForHideCheck(text).toLowerCase();
   return INSTRUCTION_PHRASES.some((phrase) => folded.includes(phrase));
 }
 
@@ -192,12 +232,23 @@ export function shouldProtectHide(input: ProtectHideInput): boolean {
   if (input.reason === 'low_contrast' && !input.backgroundReliable) {
     return false;
   }
-  const text = input.text.trim();
+  const text = textForHideCheck(input.text);
+  const phrase = matchesInstructionPhrase(text);
+  const visualReason =
+    input.visualHide === true && (input.reason === 'clipped' || input.reason === 'zero_size');
+  if (visualReason) {
+    return phrase;
+  }
   const minLength = input.minLength ?? MIN_PROTECT_TEXT_LENGTH;
-  if (text.length < minLength && !matchesInstructionPhrase(text)) {
+  if (text.length < minLength && !phrase) {
     return false;
   }
   return true;
+}
+
+/** True when `host` is already listed or the paused-site list still has room. */
+export function hostListAccepts(hosts: readonly string[], host: string): boolean {
+  return hosts.includes(host) || hosts.length < MAX_EXCLUDED_HOSTS;
 }
 
 /** Exact hostname match. A parent domain does not cover its subdomains. */

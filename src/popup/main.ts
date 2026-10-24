@@ -8,6 +8,7 @@ import {
   type MaskStyle,
   type ProtectAllStateResponse,
 } from '../shared/messages';
+import { settleChrome } from '../shared/chrome-settle';
 import { HINT_CAPTURE_SEEN_KEY, HINT_PROTECT_SEEN_KEY, HINT_TOOLS_SEEN_KEY, CUSTOM_CAPTURE_HEIGHT_KEY, CUSTOM_CAPTURE_WIDTH_KEY } from '../shared/config';
 import { hintStillNeeded } from '../shared/hints';
 import {
@@ -35,11 +36,17 @@ const SCAN_LABEL = 'Auto Scan and Mask';
 const HIDDEN_TEXT_LABEL = 'Show Hidden Text';
 const SCREENSHOT_LABEL = 'Capture visible area';
 const GENERIC_ERROR = 'Something went wrong. Try again in a moment.';
+const RESTORE_HINT = 'After you sign in, reopen DOMGuard to refresh your status.';
+const RESTORE_FAILED = "Couldn't open the sign-in page. Please try again.";
+const VERIFY_NOTE = "Can't verify your purchase right now. Check your connection and try again.";
+const VERIFY_GRACE_NOTE = `${VERIFY_NOTE} Pro features stay on for now.`;
 const PAGE_BLOCKED = "This page can't be changed. Open a normal website, then try again.";
 const CLEANUP_NOTE = 'Hidden-text cleanup is a Pro feature. Upgrade to include it.';
 const LOADING_STATUS = 'Loading…';
+const CHECKING_STATUS = 'Checking your purchase…';
 const READY_STATUS = 'Ready.';
 const CAPTURE_LIMIT_STATUS = 'Daily limit reached. Upgrade to keep capturing today.';
+const HOST_LIST_FULL = 'The paused sites list is full. Remove a site to add another.';
 
 const planBadge = document.getElementById('plan-badge');
 const quotaLine = document.getElementById('quota-line');
@@ -51,6 +58,11 @@ const upgradePanel = document.getElementById('upgrade-panel');
 
 /** Null until GET_STATUS returns. The worker, not this flag, allows a feature. */
 let knownPaid: boolean | null = null;
+/** True until the first purchase check settles. The page paints before that. */
+let purchasePending = true;
+/** Last ExtensionPay outcome. `unavailable` is a failed request, not an explicit unpaid answer. */
+let purchaseCheck: 'paid' | 'unpaid' | 'unavailable' | null = null;
+let offlineGrace = false;
 let remaining = 0;
 let limit = 3;
 let upgradeDismissed = false;
@@ -128,7 +140,15 @@ function ensureProMarks(element: HTMLButtonElement): HTMLElement {
   return marks;
 }
 
+function verifyNote(): string {
+  return offlineGrace ? VERIFY_GRACE_NOTE : VERIFY_NOTE;
+}
+
 function openUpgrade(trigger?: HTMLElement | null, focus = true): void {
+  if (purchaseCheck === 'unavailable') {
+    setStatus(verifyNote());
+    return;
+  }
   if (knownPaid === true || !(upgradePanel instanceof HTMLElement)) {
     return;
   }
@@ -161,18 +181,39 @@ function revealCleanupNote(): void {
 }
 
 function renderPlan(): void {
-  const paid = knownPaid === true;
-  const unpaid = knownPaid === false;
+  const pending = purchasePending;
+  const unverified = !pending && purchaseCheck === 'unavailable';
+  const paid = !pending && !unverified && knownPaid === true;
+  const unpaid = !pending && !unverified && knownPaid === false;
+  const freeLook = pending || unpaid;
   if (planBadge) {
-    planBadge.textContent = paid ? 'Pro' : unpaid ? 'Free' : '…';
-    planBadge.classList.toggle('badge-pro', paid);
+    if (pending) {
+      planBadge.textContent = 'Free';
+      planBadge.classList.toggle('badge-pro', false);
+    } else if (unverified) {
+      planBadge.textContent = offlineGrace ? 'Pro' : '…';
+      planBadge.classList.toggle('badge-pro', offlineGrace);
+    } else {
+      planBadge.textContent = paid ? 'Pro' : unpaid ? 'Free' : '…';
+      planBadge.classList.toggle('badge-pro', paid);
+    }
   }
   if (quotaLine) {
-    quotaLine.textContent = paid
-      ? 'Unlimited screenshots'
-      : unpaid
-        ? unpaidScreenshotQuotaText(remaining, limit)
-        : 'Checking plan…';
+    if (pending) {
+      quotaLine.textContent = 'Checking plan…';
+    } else if (unverified) {
+      quotaLine.textContent = offlineGrace ? 'Unlimited screenshots' : '…';
+    } else {
+      quotaLine.textContent = paid
+        ? 'Unlimited screenshots'
+        : unpaid
+          ? unpaidScreenshotQuotaText(remaining, limit)
+          : 'Checking plan…';
+    }
+  }
+  const retryPurchase = document.getElementById('retry-purchase');
+  if (retryPurchase instanceof HTMLButtonElement) {
+    retryPurchase.hidden = !unverified;
   }
 
   for (const elementId of ['scan-and-mask', 'detect-hidden-text']) {
@@ -180,7 +221,7 @@ function renderPlan(): void {
     if (!element) {
       continue;
     }
-    ensureProMarks(element).hidden = !unpaid;
+    ensureProMarks(element).hidden = !freeLook;
   }
 
   const protectMark = document.getElementById('protect-pro-mark');
@@ -188,7 +229,12 @@ function renderPlan(): void {
     if (!protectMark.firstChild) {
       protectMark.append(createLockIcon(), createProTag());
     }
-    protectMark.hidden = !unpaid;
+    protectMark.hidden = !freeLook;
+  }
+
+  const restoreSettings = document.getElementById('restore-purchase-settings');
+  if (restoreSettings instanceof HTMLElement) {
+    restoreSettings.hidden = !unpaid;
   }
 
   const screenshotButton = button('capture-screenshot');
@@ -207,7 +253,7 @@ function renderPlan(): void {
   }
   setSizeInputsDisabled(screenshotBusy);
 
-  if (paid && upgradePanel instanceof HTMLElement) {
+  if ((paid || unverified) && upgradePanel instanceof HTMLElement) {
     upgradePanel.hidden = true;
   }
   if (paid && cleanupNote instanceof HTMLElement) {
@@ -256,19 +302,43 @@ function lockBlockedPage(): void {
 }
 
 /** Paint the worker's latest paid flag and quota. This does not grant access. */
+function showUnverifiedPurchase(): void {
+  purchasePending = false;
+  purchaseCheck = 'unavailable';
+  offlineGrace = false;
+  knownPaid = null;
+  renderPlan();
+  if (statusEl?.textContent !== GRANT_NEEDED) {
+    setStatus(verifyNote());
+  }
+}
+
 async function refreshEntitlement(): Promise<void> {
   try {
     const response = await sendToBackground({ type: 'GET_STATUS' });
     if (!response.ok) {
-      setStatus(GENERIC_ERROR);
+      showUnverifiedPurchase();
       return;
     }
-    knownPaid = response.paid;
+    purchasePending = false;
+    knownPaid = response.purchaseCheck === 'unavailable' ? (response.offlineGrace ? true : null) : response.paid;
+    purchaseCheck = response.purchaseCheck;
+    offlineGrace = response.offlineGrace;
     remaining = response.quota.remaining;
     limit = response.quota.limit;
     renderPlan();
+    if (statusEl?.textContent === GRANT_NEEDED) {
+      return;
+    }
+    if (purchaseCheck === 'unavailable') {
+      setStatus(verifyNote());
+      return;
+    }
+    if (statusEl?.textContent === CHECKING_STATUS || statusEl?.textContent === LOADING_STATUS) {
+      setStatus(READY_STATUS);
+    }
   } catch {
-    setStatus(GENERIC_ERROR);
+    showUnverifiedPurchase();
   }
 }
 
@@ -434,14 +504,14 @@ function sizeInput(elementId: 'custom-width' | 'custom-height'): HTMLInputElemen
 
 function rememberCustomSide(key: string, raw: string): void {
   if (raw.trim() === '') {
-    void chrome.storage.local.remove(key);
+    void settleChrome(chrome.storage.local.remove(key), undefined);
     return;
   }
   const pixel = storedCustomPixel(Number(raw));
   if (pixel === null) {
     return;
   }
-  void chrome.storage.local.set({ [key]: pixel });
+  void settleChrome(chrome.storage.local.set({ [key]: pixel }), undefined);
 }
 
 async function restoreCustomSize(): Promise<void> {
@@ -512,7 +582,7 @@ areaButton?.addEventListener('click', (event) => {
   if (!event.isTrusted || areaButton.disabled) {
     return;
   }
-  void startAreaCapture(areaButton);
+  void settleChrome(startAreaCapture(areaButton), undefined);
 });
 
 const customSizeButton = button('capture-custom-size');
@@ -528,11 +598,14 @@ customSizeButton?.addEventListener('click', (event) => {
     setStatus('Enter a width and height from 16 to 8000, then try again.');
     return;
   }
-  void chrome.storage.local.set({
-    [CUSTOM_CAPTURE_WIDTH_KEY]: size.width,
-    [CUSTOM_CAPTURE_HEIGHT_KEY]: size.height,
-  });
-  void startAreaCapture(customSizeButton, size);
+  void settleChrome(
+    chrome.storage.local.set({
+      [CUSTOM_CAPTURE_WIDTH_KEY]: size.width,
+      [CUSTOM_CAPTURE_HEIGHT_KEY]: size.height,
+    }),
+    undefined,
+  );
+  void settleChrome(startAreaCapture(customSizeButton, size), undefined);
 });
 
 sizeInput('custom-width')?.addEventListener('input', (event) => {
@@ -704,6 +777,25 @@ button('upgrade-dismiss')?.addEventListener('click', () => {
   closeUpgrade();
 });
 
+async function openRestorePurchase(): Promise<void> {
+  try {
+    const response = await sendToBackground({ type: 'OPEN_LOGIN' });
+    setStatus(response.ok ? RESTORE_HINT : RESTORE_FAILED);
+  } catch {
+    setStatus(RESTORE_FAILED);
+  }
+}
+
+for (const elementId of ['restore-purchase', 'restore-purchase-settings-button']) {
+  const control = button(elementId);
+  control?.addEventListener('click', (event) => {
+    if (!event.isTrusted) {
+      return;
+    }
+    void openRestorePurchase();
+  });
+}
+
 chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id) {
     return;
@@ -737,7 +829,6 @@ const PROTECT_ON_SITE = 'On. Hiding hidden text as pages load and change.';
 const PROTECT_PAUSED = 'Paused on this site.';
 const PROTECT_PAGE_BLOCKED = "Can't run on this page. Chrome blocks extensions here. Open a normal website, then try again.";
 const GRANT_NEEDED = 'Protect all sites needs permission. Turn it on here to allow access.';
-const PRO_UNVERIFIED = "Couldn't confirm Pro just now. Check your connection, then try again.";
 const HOST_UNAVAILABLE = 'This page did not share its address. Open the site, then try again.';
 const PROTECT_OFF = 'Protect all sites is off. Turn it on when you want coverage again.';
 const PROTECT_SAVED = 'Protection settings saved.';
@@ -1025,6 +1116,13 @@ async function sendException(
   try {
     const response = await sendToBackground({ type, host });
     if (!response.ok) {
+      if (response.error === 'HOST_LIST_FULL') {
+        if (exception instanceof HTMLInputElement) {
+          exception.checked = false;
+        }
+        setStatus(HOST_LIST_FULL);
+        return;
+      }
       setStatus(GENERIC_ERROR);
       return;
     }
@@ -1049,7 +1147,7 @@ for (const id of ['protect-hide-text', 'protect-mask-data', 'mask-api', 'mask-ca
     const next = optionsFromDom();
     const grant =
       next.hideText || next.maskSensitive
-        ? chrome.permissions.request({ origins: ['<all_urls>'] })
+        ? settleChrome(chrome.permissions.request({ origins: ['<all_urls>'] }), false)
         : Promise.resolve(true);
     void (async () => {
       const allowed = await grant;
@@ -1145,7 +1243,7 @@ protectToggle()?.addEventListener('change', () => {
           setStatus(PROTECT_PRO_ONLY);
           await refreshEntitlement();
         } else if (response.error === 'PRO_UNAVAILABLE') {
-          setStatus(PRO_UNVERIFIED);
+          setStatus(verifyNote());
         } else if (response.error === 'PERMISSION_DENIED') {
           setStatus(PERMISSION_DENIED);
         } else {
@@ -1297,7 +1395,7 @@ async function refreshShortcuts(): Promise<void> {
 }
 
 function openShortcutSettings(): void {
-  void chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
+  void settleChrome(chrome.tabs.create({ url: 'chrome://extensions/shortcuts' }), undefined);
 }
 
 document.body.addEventListener('click', (event) => {
@@ -1312,7 +1410,7 @@ document.body.addEventListener('click', (event) => {
       tip.hidden = true;
     }
     if (key) {
-      void chrome.storage.local.set({ [key]: true });
+      void settleChrome(chrome.storage.local.set({ [key]: true }), undefined);
     }
     return;
   }
@@ -1325,7 +1423,20 @@ button('open-help')?.addEventListener('click', (event) => {
   if (!event.isTrusted) {
     return;
   }
-  void chrome.tabs.create({ url: chrome.runtime.getURL('src/welcome/index.html') });
+  void settleChrome(chrome.tabs.create({ url: chrome.runtime.getURL('src/welcome/index.html') }), undefined);
+});
+
+button('retry-purchase')?.addEventListener('click', (event) => {
+  if (!event.isTrusted) {
+    return;
+  }
+  purchasePending = true;
+  purchaseCheck = null;
+  knownPaid = null;
+  offlineGrace = false;
+  setStatus(CHECKING_STATUS);
+  renderPlan();
+  void refreshEntitlement();
 });
 
 async function refreshHints(): Promise<void> {
@@ -1349,16 +1460,24 @@ async function refreshHints(): Promise<void> {
   }
 }
 
+setStatus(CHECKING_STATUS);
+renderPlan();
+void refreshEntitlement();
+
 void (async () => {
   await restoreCustomSize();
   await refreshPageAccess();
   await refreshHints();
-  await refreshEntitlement();
   await refreshShortcuts();
   const grantNeeded = await refreshProtect();
   if (grantNeeded && !pageBlocked) {
     setStatus(GRANT_NEEDED);
-  } else if (statusEl?.textContent === LOADING_STATUS) {
+    return;
+  }
+  if (purchasePending || purchaseCheck === 'unavailable') {
+    return;
+  }
+  if (statusEl?.textContent === CHECKING_STATUS || statusEl?.textContent === LOADING_STATUS) {
     setStatus(READY_STATUS);
   }
 })();

@@ -30,6 +30,7 @@ import {
 } from './protect-decision';
 import { altPeekIntent } from './alt-peek';
 import { collectFieldsUnder, collectTextNodesUnder, scanCollected } from './scanner';
+import { settleChrome } from '../shared/chrome-settle';
 import { parseExtensionMessage, type MaskStyle } from '../shared/messages';
 import { DEFAULT_MASK_TYPES, enabledPatternIds, type MaskTypeSelection } from '../shared/patterns';
 
@@ -191,9 +192,15 @@ function pump(): void {
       }
     }
   }
-  const matches = scanCollected(nodes, fields, patternIds);
-  if (matches.length > 0) {
-    appendScanMasks(matches, maskStyle);
+  const scanned = scanCollected(nodes, fields, patternIds);
+  if (scanned.matches.length > 0) {
+    appendScanMasks(scanned.matches, maskStyle);
+  }
+  for (const node of scanned.pendingText) {
+    if (!queuedText.has(node)) {
+      queuedText.add(node);
+      textQueue.push(node);
+    }
   }
   spentMs += performance.now() - startedAt;
   if (textQueue.length > 0 || fieldQueue.length > 0) {
@@ -314,7 +321,7 @@ function listen(): void {
     if (!watched.some((key) => key in changes)) {
       return;
     }
-    void refreshFromStorage();
+    void settleChrome(refreshFromStorage(), undefined);
   });
   chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
     if (sender.id !== chrome.runtime.id) {
@@ -348,5 +355,5 @@ function listen(): void {
 if (globalFlag[RUNNING_FLAG] !== true && inTopFrame()) {
   globalFlag[RUNNING_FLAG] = true;
   listen();
-  void refreshFromStorage();
+  void settleChrome(refreshFromStorage(), undefined);
 }

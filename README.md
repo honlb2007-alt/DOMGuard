@@ -18,6 +18,8 @@ Screenshots include only the visible area of the current tab. They do not includ
 
 Detection is best-effort. It cannot guarantee that every secret or every hidden instruction is found. Review the screen before sharing.
 
+Text that uses a visual-hiding technique (a zero clip rectangle, `clip-path: inset(50%)` or `inset(100%)`, or a box no larger than 1px with overflow hidden) is hidden only when it matches an instruction phrase. That leaves ordinary screen-reader text in place.
+
 ## Permissions
 
 | Permission | Why it is needed |
@@ -36,7 +38,7 @@ The service worker is the only place that decides Pro access and the free screen
 
 Register the extension at [extensionpay.com](https://extensionpay.com). `EXTPAY_ID` in `src/shared/config.ts` is `domguard`. Pro is a one-time purchase through ExtensionPay and Stripe. The popup shows `$4.99`. That figure is the popup label, not a price read back from ExtensionPay.
 
-When ExtensionPay checks the install, it saves the user record in `chrome.storage.sync` under `extensionpay_user`. That record can include the payer's email, along with payment fields returned by ExtensionPay. It also stores `extensionpay_api_key` and `extensionpay_installed_at`. DOMGuard's own paid check is kept in the service worker's memory and is not written to storage.
+When ExtensionPay checks the install, it saves the user record in `chrome.storage.sync` under `extensionpay_user`. That record can include the payer's email, along with payment fields returned by ExtensionPay. It also stores `extensionpay_api_key` and `extensionpay_installed_at`. DOMGuard keeps a 10-minute paid flag in the service worker's memory. When ExtensionPay explicitly says the install is paid, DOMGuard stores `domguardPurchaseVerified` in `chrome.storage.local` as `paid: true` and `verifiedAt`. That record has no email. The person using the browser can change it, so it is not a security boundary. If a later check cannot reach ExtensionPay, Pro features stay available for `PRO_OFFLINE_GRACE_DAYS` (7) after `verifiedAt`. An explicit unpaid answer deletes the record. A failed check does not turn off Protect all sites.
 
 ## Screenshots
 
@@ -60,6 +62,45 @@ Suggested keys come from `manifest.json`. The popup and the welcome page read th
 Change them at `chrome://extensions/shortcuts`.
 
 **Capture area** starts a drag. Arrow keys move an 8-pixel box, and Shift plus an arrow changes its size. Enter captures that box once it is at least 8 pixels on each side. Enter before any arrow still captures the visible area. Press the same shortcut again while that tool is open to capture the visible area. The second press does not copy by itself. Dragging copies when the pointer release is allowed to write the clipboard. If the copy does not happen, the card says to press Copy, or to open a normal website and try again.
+
+## Troubleshooting
+
+### DOMGuard doesn't run on some pages
+
+Chrome does not allow extensions on `chrome://` pages, the Chrome Web Store, the New Tab page, or the built-in PDF viewer. On those pages the popup says Chrome blocks extensions there.
+
+### Protect all sites seems off
+
+The toolbar icon shows ON while Protect all sites is on. Open `chrome://extensions`, open DOMGuard's details, and confirm site access is allowed. In the popup, turn Protect all sites off, then turn it on again.
+
+### A site looks broken or something disappeared
+
+In the popup, turn on "Disable on this site" for that website, or turn Protect all sites off. Write to binlabs.studio@gmail.com with the address of the site. Do not attach a screenshot that contains a key, a card number, or other personal information.
+
+### Screenshot isn't pasting
+
+A capture copies a PNG to the clipboard. The program you paste into has to accept a picture. If the page does not have focus, the automatic copy can fail, and the card on the page offers Copy. If copying is not available on that page, the card says to open a normal website and try again. An http page is a common case, because Chrome offers this clipboard write on a secure page.
+
+### Shortcuts don't work
+
+Open `chrome://extensions/shortcuts` to see and change DOMGuard's keys. Another extension can use the same keys.
+
+### Pro shows as Free or can't verify
+
+Check your connection. Open DOMGuard and choose Restore purchase. It is under Upgrade, and in Settings while the plan says Free. Sign in with the email from checkout, then close the popup and open it again.
+
+### How to reset DOMGuard
+
+At `chrome://extensions`, remove DOMGuard and install it again. That restores the default settings. A purchase can be brought back with Restore purchase. On the extension's details page, Chrome may also offer a way to clear the extension's saved data. That returns settings to their defaults and leaves the extension installed.
+
+### Known limitations
+
+- Protect all sites does not look inside iframes, and it cannot see a closed shadow tree.
+- Text with `display: none` is not treated as hidden text. It is not painted into a screenshot.
+- Detection is a best guess. It does not find every secret or every hidden instruction.
+- Text that uses a visual-hiding technique (a zero clip rectangle, `clip-path: inset(50%)` or `inset(100%)`, or a box no larger than 1px with overflow hidden) is hidden only when it matches an instruction phrase.
+- A screenshot is the visible area of the current tab.
+- After a refund, Pro can stay on until the next check. The in-memory result lasts up to 10 minutes. Protect all sites is checked again when the popup opens or the browser restarts.
 
 ## Development rules
 
@@ -101,4 +142,10 @@ Set it back to `false` to return to the free allowance. A production build remov
 npm run package
 ```
 
-This builds `dist`, then writes `domguard-1.1.0.zip` in the project root. That zip is the Chrome Web Store package for version 1.1.0. It contains the files inside `dist`, with `manifest.json` at the archive root. Production builds do not emit source maps. `dist/`, `node_modules/`, and `privacy-site/` stay out of git. The privacy policy that matches this release is [docs/privacy.html](docs/privacy.html).
+This builds `dist`, then writes `domguard-1.1.1.zip` in the project root. That zip is the Chrome Web Store package for version 1.1.1. It contains the files inside `dist`, with `manifest.json` at the archive root. Production builds do not emit source maps. `dist/`, `node_modules/`, and `privacy-site/` stay out of git. The privacy policy that matches this release is [docs/privacy.html](docs/privacy.html).
+
+Version 1.1.1 adds Restore purchase. While the plan shows Free, the upgrade panel and Settings open ExtensionPay's sign-in page. After signing in, reopen DOMGuard. The Protect all sites line now says the feature hides hidden text and masks the secrets you select, and that a screenshot or screen recording of the page shows those changes.
+
+## Copyright
+
+DOMGuard's own work is copyrighted by binlabs.studio. See [COPYRIGHT.md](COPYRIGHT.md). No open-source license is granted for that work. ExtPay remains under its own license.
