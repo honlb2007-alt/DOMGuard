@@ -6,6 +6,17 @@ On a Pro install, **Auto Scan and Mask** covers secrets such as API keys, email 
 
 Scanning, masking, and the pixel pass run in the browser. DOMGuard does not upload page text or screenshots.
 
+## Links
+
+- Public site: https://domguard-privacy.netlify.app/
+- Hidden-text demo: https://domguard-privacy.netlify.app/hidden-text-demo
+- Same demo, for a fresh share card on X: https://domguard-privacy.netlify.app/hidden-text-demo?v=2
+- Privacy policy: https://domguard-privacy.netlify.app/privacy
+- Support: https://domguard-privacy.netlify.app/support
+- Chrome Web Store: https://chromewebstore.google.com/detail/domguard-hide-secrets-bef/abbelhilicbhdekpffocoojogdcjofkp
+
+The pages are in [privacy-site/](privacy-site/). The share image is [privacy-site/share.jpg](privacy-site/share.jpg).
+
 ## Scope and limitations
 
 DOMGuard works on web pages in the browser only. It does not process other desktop apps.
@@ -142,7 +153,7 @@ Set it back to `false` to return to the free allowance. A production build remov
 npm run package
 ```
 
-This builds `dist`, then writes `domguard-1.1.1.zip` in the project root. That zip is the Chrome Web Store package for version 1.1.1. It contains the files inside `dist`, with `manifest.json` at the archive root. Production builds do not emit source maps. `dist/`, `node_modules/`, and `privacy-site/` stay out of git. The privacy policy that matches this release is [docs/privacy.html](docs/privacy.html).
+This builds `dist`, then writes `domguard-1.1.1.zip` in the project root. That zip is the Chrome Web Store package for version 1.1.1. It contains the files inside `dist`, with `manifest.json` at the archive root. Production builds do not emit source maps. `dist/` and `node_modules/` stay out of git. The public site in `privacy-site/` is not part of the store zip. The privacy policy that matches this release is [docs/privacy.html](docs/privacy.html). The hosted copy is https://domguard-privacy.netlify.app/privacy.
 
 Version 1.1.1 adds Restore purchase. While the plan shows Free, the upgrade panel and Settings open ExtensionPay's sign-in page. After signing in, reopen DOMGuard. The Protect all sites line now says the feature hides hidden text and masks the secrets you select, and that a screenshot or screen recording of the page shows those changes.
 

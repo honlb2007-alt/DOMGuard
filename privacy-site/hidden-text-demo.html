@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>See the text you can't see — DOMGuard</title>
+  <meta name="description" content="A Chrome demo of hidden text used in prompt-injection reports, and how a screenshot can still capture it. Try it with DOMGuard.">
+  <link rel="canonical" href="https://domguard-privacy.netlify.app/hidden-text-demo">
+  <meta property="og:title" content="See the text you can't see — DOMGuard">
+  <meta property="og:description" content="Hidden text can sit on a page a person does not read. This demo shows four harmless cases, then how DOMGuard outlines them.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://domguard-privacy.netlify.app/hidden-text-demo">
+  <meta property="og:image" content="https://domguard-privacy.netlify.app/share.jpg">
+  <meta property="og:image:type" content="image/jpeg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="DOMGuard demo. A blank page, then a black bar that reads: TEST ONLY - case 1, hidden text for a demo.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="See the text you can't see — DOMGuard">
+  <meta name="twitter:description" content="Hidden text can sit on a page a person does not read. This demo shows four harmless cases, then how DOMGuard outlines them.">
+  <meta name="twitter:image" content="https://domguard-privacy.netlify.app/share.jpg">
+  <meta name="twitter:image:alt" content="DOMGuard demo. A blank page, then a black bar that reads: TEST ONLY - case 1, hidden text for a demo.">
+  <style>
+    html {
+      scrollbar-color: #101114 #e8eaef;
+    }
+    body {
+      margin: 0;
+      background: #e8eaef;
+      color: #101114;
+      font: 17px/1.55 "Segoe UI", system-ui, sans-serif;
+    }
+    .mast {
+      background: #101114;
+      color: #e8eaef;
+    }
+    .mast a {
+      color: #e8eaef;
+    }
+    .wrap {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 28px 32px 36px;
+    }
+    ::selection {
+      background: #101114;
+      color: #e8eaef;
+    }
+    a {
+      color: #101114;
+      text-underline-offset: 3px;
+    }
+    a:focus-visible {
+      outline: 2px solid #101114;
+      outline-offset: 4px;
+    }
+    .foot {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 16px 32px 48px;
+      border-top: 1px solid #101114;
+    }
+    .nav a {
+      margin-right: 16px;
+    }
+    h1 {
+      margin: 28px 0 12px;
+      max-width: 12ch;
+      font-size: 64px;
+      line-height: 0.95;
+      letter-spacing: -0.03em;
+      font-weight: 650;
+    }
+    .lede {
+      max-width: 38rem;
+      margin: 0;
+      font-size: 18px;
+    }
+    .do {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 24px;
+      margin: 20px 0 0;
+      padding: 0;
+      list-style: none;
+    }
+    .do a {
+      text-decoration: none;
+      border-bottom: 1px solid #e8eaef;
+    }
+    main {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 32px 48px;
+    }
+    h2 {
+      margin: 48px 0 8px;
+      font-size: 22px;
+      line-height: 1.2;
+      font-weight: 650;
+    }
+    #samples h2 {
+      margin-top: 0;
+    }
+    section {
+      scroll-margin-top: 16px;
+    }
+    p, li {
+      margin: 0 0 12px;
+    }
+    ul {
+      margin: 0 0 12px;
+      padding-left: 20px;
+      max-width: 65ch;
+    }
+    .stage {
+      height: 224px;
+      margin: 32px 0 8px;
+      border: 1px solid #101114;
+      background: #e8eaef;
+      overflow: hidden;
+      scroll-margin-top: 16px;
+    }
+    .stage canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+    .caption {
+      margin: 0 0 8px;
+      max-width: 62ch;
+      font-size: 15px;
+    }
+    .reveal {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      margin: -1px;
+      padding: 0;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      border: 0;
+      white-space: nowrap;
+    }
+    .switch {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      box-sizing: border-box;
+      width: 100%;
+      min-height: 64px;
+      margin: 8px 0 16px;
+      padding: 12px 16px;
+      border: 2px solid #101114;
+      background: #e8eaef;
+      color: #101114;
+      font-size: 18px;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    .reveal:checked ~ .switch {
+      background: #101114;
+      color: #e8eaef;
+    }
+    .track {
+      position: relative;
+      flex: 0 0 auto;
+      width: 48px;
+      height: 24px;
+      border: 2px solid #101114;
+      background: #e8eaef;
+    }
+    .track::after {
+      content: "";
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 16px;
+      height: 16px;
+      background: #101114;
+    }
+    @media (prefers-reduced-motion: no-preference) {
+      .track::after {
+        transition: left 160ms linear;
+      }
+    }
+    .reveal:focus-visible ~ .switch .track {
+      outline: 2px solid #101114;
+      outline-offset: 4px;
+    }
+    .reveal:checked ~ .switch .track {
+      background: #101114;
+    }
+    .reveal:checked ~ .switch .track::after {
+      left: 26px;
+      background: #e2b15a;
+    }
+    .status {
+      margin: 8px 0 24px;
+      padding: 16px;
+      border: 1px solid #101114;
+      max-width: 65ch;
+    }
+    .when-on {
+      display: none;
+    }
+    .reveal:checked ~ .switch .when-off,
+    .reveal:checked ~ .status .when-off {
+      display: none;
+    }
+    .reveal:checked ~ .switch .when-on,
+    .reveal:checked ~ .status .when-on {
+      display: inline;
+    }
+    .demo {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+    .case {
+      margin: 0;
+      min-width: 0;
+    }
+    .case h3 {
+      margin: 0 0 8px;
+      font-size: 18px;
+      line-height: 1.3;
+      font-weight: 650;
+    }
+    .hint {
+      margin: 0 0 8px;
+      max-width: 65ch;
+    }
+    .well {
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      min-height: 200px;
+      margin: 0;
+      padding: 16px;
+      border: 1px solid #101114;
+      background: #e8eaef;
+    }
+    .sheet-text {
+      margin: 0;
+      color: #e8eaef;
+      font-size: 22px;
+      line-height: 1.45;
+      cursor: text;
+      user-select: text;
+    }
+    .scale {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      gap: 20px;
+      margin: 0;
+    }
+    .step {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+    .step b {
+      font-weight: 650;
+      line-height: 1;
+    }
+    .step i {
+      font-style: normal;
+      font-size: 13px;
+      line-height: 1.2;
+    }
+    .scale .px1 {
+      font-size: 1px;
+      line-height: 1px;
+    }
+    .film {
+      position: relative;
+      height: 200px;
+      overflow: hidden;
+      border: 1px solid #101114;
+      background: #e8eaef;
+    }
+    .film p {
+      position: absolute;
+      left: -170px;
+      top: 84px;
+      margin: 0;
+      font-size: 28px;
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+    .film-screen {
+      position: absolute;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 38%;
+      border-left: 2px solid #101114;
+      background: #e8eaef;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+    }
+    .clip-well {
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      overflow: hidden;
+    }
+    .slice {
+      width: 100%;
+      height: 16px;
+      overflow: hidden;
+      border-top: 2px solid #101114;
+      border-bottom: 2px solid #101114;
+      font-size: 42px;
+      line-height: 42px;
+      white-space: nowrap;
+    }
+    .story {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 16px;
+      margin: 16px 0 0;
+    }
+    .story figure {
+      margin: 0;
+    }
+    .frame {
+      height: 148px;
+      border: 1px solid #101114;
+      background: #e8eaef;
+      overflow: hidden;
+    }
+    .frame-bar {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      height: 28px;
+      padding: 0 10px;
+      background: #101114;
+      color: #e8eaef;
+      font-size: 12px;
+      line-height: 28px;
+    }
+    .frame-bar i {
+      width: 6px;
+      height: 6px;
+      background: #e8eaef;
+    }
+    .frame-bar span {
+      margin-left: 8px;
+    }
+    .frame-body {
+      padding: 12px;
+    }
+    .ghost {
+      height: 8px;
+      margin: 0 0 8px;
+      background: #e4e6eb;
+    }
+    .shot-line,
+    .ask,
+    .reply {
+      margin: 0 0 8px;
+      font-size: 13px;
+      line-height: 1.35;
+    }
+    .shot-line,
+    .reply {
+      padding: 6px 8px;
+      background: #101114;
+      color: #e8eaef;
+    }
+    .ask {
+      padding: 6px 8px;
+      border: 1px solid #101114;
+    }
+    .story figcaption {
+      margin-top: 8px;
+      font-size: 15px;
+      font-weight: 650;
+    }
+    .plan {
+      margin: 24px 0 0;
+      max-width: 62ch;
+    }
+    .sample {
+      margin: 0;
+    }
+    .method {
+      display: none;
+      margin: 0 0 8px;
+      color: #101114;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .same {
+      color: #e8eaef;
+    }
+    .tiny {
+      font-size: 1px;
+      line-height: 1px;
+    }
+    .off-slot {
+      position: relative;
+      height: 0;
+      overflow: hidden;
+    }
+    .off {
+      position: absolute;
+      left: -8000px;
+      top: 0;
+      margin: 0;
+    }
+    .clip {
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(100%);
+    }
+    .reveal:checked ~ .demo .sample,
+    .reveal:checked ~ .demo .sheet-text {
+      color: #101114;
+      font-size: 17px;
+      line-height: 1.55;
+      outline: 1px dashed #101114;
+      padding: 8px;
+    }
+    .reveal:checked ~ .demo .method {
+      display: block;
+    }
+    .reveal:checked ~ .demo .off-slot {
+      height: auto;
+      overflow: visible;
+    }
+    .reveal:checked ~ .demo .off {
+      position: static;
+      left: auto;
+      top: auto;
+    }
+    .reveal:checked ~ .demo .clip {
+      width: auto;
+      height: auto;
+      overflow: visible;
+      clip-path: none;
+    }
+    .steps {
+      list-style: none;
+      margin: 16px 0 24px;
+      padding: 0;
+      counter-reset: step;
+    }
+    .steps li {
+      position: relative;
+      margin: 0 0 16px;
+      padding-left: 40px;
+      max-width: 65ch;
+      counter-increment: step;
+    }
+    .steps li::before {
+      content: counter(step);
+      position: absolute;
+      left: 0;
+      top: 2px;
+      width: 24px;
+      height: 24px;
+      border: 1px solid #101114;
+      font-size: 13px;
+      line-height: 22px;
+      text-align: center;
+    }
+    .store {
+      display: inline-block;
+      margin: 8px 0 0;
+      padding: 12px 16px;
+      background: #101114;
+      color: #e8eaef;
+      text-decoration: none;
+    }
+    .store:hover {
+      background: #e8eaef;
+      color: #101114;
+      outline: 1px solid #101114;
+    }
+    @media (max-width: 800px) {
+      h1 {
+        font-size: 40px;
+      }
+      .wrap, main {
+        padding-left: 16px;
+        padding-right: 16px;
+      }
+      .demo, .story {
+        grid-template-columns: 1fr;
+      }
+      .stage {
+        height: 160px;
+      }
+      .foot {
+        padding: 16px 16px 40px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="mast">
+    <div class="wrap">
+      <p class="nav">
+        <a href="index.html">DOMGuard</a>
+        <a href="privacy.html">Privacy Policy</a>
+        <a href="support.html">Support</a>
+      </p>
+      <h1>See the text you can't see</h1>
+      <p class="lede">A web page can carry text a person does not see. Researchers and security teams have reported cases where that kind of text was used against AI tools.</p>
+      <ol class="do">
+        <li><a href="#samples">1. Highlight a box</a></li>
+        <li><a href="#samples">2. See how small type gets</a></li>
+        <li><a href="#after">3. See what an AI receives</a></li>
+      </ol>
+    </div>
+  </header>
+  <main>
+    <section id="samples">
+      <h2>Four harmless samples</h2>
+      <p>Each box holds a real line. Nothing here is a secret. Highlight the first box with the mouse. The other boxes show the same idea in a different hiding method.</p>
+      <input class="reveal" id="reveal" type="checkbox" aria-describedby="reveal-status">
+      <div class="demo">
+        <section class="case">
+          <h3>1. Nearly the same color</h3>
+          <p class="hint">The sentence is written here. Drag across the box.</p>
+          <div class="well">
+            <p class="sample same sheet-text"><span class="method">Nearly the same color as the page</span>TEST ONLY - case 1, hidden text for a demo. TEST ONLY - case 1, hidden text for a demo. TEST ONLY - case 1, hidden text for a demo.</p>
+          </div>
+        </section>
+        <section class="case">
+          <h3>2. Tiny type</h3>
+          <p class="hint">The same letter, from 72 pixels down to 1 pixel.</p>
+          <div class="well">
+            <p class="scale" aria-hidden="true"><span class="step"><b style="font-size:72px">A</b><i>72px</i></span><span class="step"><b style="font-size:32px">A</b><i>32px</i></span><span class="step"><b style="font-size:12px">A</b><i>12px</i></span><span class="step"><b style="font-size:4px">A</b><i>4px</i></span><span class="step"><b class="px1">A</b><i>1px</i></span></p>
+            <p class="sample tiny"><span class="method">Tiny type</span>TEST ONLY - case 2, hidden text for a demo</p>
+          </div>
+        </section>
+        <section class="case">
+          <h3>3. Off-screen</h3>
+          <p class="hint">The panel on the right is the screen. The line starts outside it.</p>
+          <div class="film" aria-hidden="true">
+            <p>TEST ONLY - case 3, hidden text for a demo</p>
+            <div class="film-screen">Screen</div>
+          </div>
+          <div class="off-slot">
+            <p class="sample off"><span class="method">Moved off-screen</span>TEST ONLY - case 3, hidden text for a demo</p>
+          </div>
+        </section>
+        <section class="case">
+          <h3>4. Clipped</h3>
+          <p class="hint">The line continues. The window cuts it off.</p>
+          <div class="well clip-well">
+            <div class="slice" aria-hidden="true">TEST ONLY - case 4, hidden text for a demo</div>
+          </div>
+          <p class="sample clip"><span class="method">Clipped out of view</span>TEST ONLY - case 4, hidden text for a demo</p>
+        </section>
+      </div>
+      <label class="switch" for="reveal"><span class="track" aria-hidden="true"></span><span><span class="when-off">Outline all four lines</span><span class="when-on">Hide the outlines</span></span></label>
+      <p class="status" id="reveal-status"><span class="when-off">The boxes stay as they are. This switch draws a dashed outline around each hidden line.</span><span class="when-on">Each dashed frame is a hidden line. The small label names the method.</span></p>
+    </section>
+
+    <section id="after">
+      <h2>A screenshot still carries it</h2>
+      <p>The page can look empty. A screenshot of that page can still contain the line. An AI tool that reads the picture can repeat the line, or treat it as an instruction.</p>
+      <div class="story">
+        <figure>
+          <div class="frame">
+            <div class="frame-bar"><i></i><i></i><i></i><span>page</span></div>
+            <div class="frame-body">
+              <div class="ghost"></div>
+              <div class="ghost"></div>
+              <div class="ghost"></div>
+            </div>
+          </div>
+          <figcaption>1. The page looks empty</figcaption>
+        </figure>
+        <figure>
+          <div class="frame">
+            <div class="frame-bar"><i></i><i></i><i></i><span>page.png</span></div>
+            <div class="frame-body">
+              <div class="ghost"></div>
+              <p class="shot-line">TEST ONLY - case 1, hidden text for a demo</p>
+            </div>
+          </div>
+          <figcaption>2. The screenshot still has the line</figcaption>
+        </figure>
+        <figure>
+          <div class="frame">
+            <div class="frame-bar"><i></i><i></i><i></i><span>AI tool</span></div>
+            <div class="frame-body">
+              <p class="ask">Read this screenshot.</p>
+              <p class="reply">TEST ONLY - case 1, hidden text for a demo</p>
+            </div>
+          </div>
+          <figcaption>3. The tool can follow that line</figcaption>
+        </figure>
+      </div>
+      <p class="plan">If enough people ask for it, a later version will also look for words inside pictures and in page metadata. This version does not.</p>
+    </section>
+    <div class="stage" id="picture">
+      <canvas id="field" width="960" height="200" aria-hidden="true"></canvas>
+    </div>
+    <p class="caption">The moving lines are only a picture. The hidden text is in the four boxes above, not in the picture.</p>
+
+    <section id="reports">
+      <h2>Reported cases</h2>
+      <ul>
+        <li><a href="https://brave.com/blog/unseeable-prompt-injections/">Brave</a> showed an AI browser reading faint text from a screenshot and treating it as instructions. In that case the text was inside the image.</li>
+        <li><a href="https://infosecurity-magazine.com/news/indirect-prompt-injection-web">Infosecurity Magazine</a> reported websites that hid instructions aimed at AI agents, including text placed off-screen and instructions stored in page metadata.</li>
+        <li><a href="https://labs.zenity.io/post/claude-in-chrome-breaking-down-the-injection">Zenity</a> published a breakdown of an injection against Claude in Chrome.</li>
+      </ul>
+    </section>
+
+      <section id="domguard">
+        <h2>Try it with DOMGuard</h2>
+        <ol class="steps">
+          <li>Leave the switch above off. Install DOMGuard, open it on this page, and choose Show Hidden Text. The extension outlines hidden text and lists what it says.</li>
+          <li>Turn on Protect all sites. Allow access when Chrome asks. The switch stays off until you do this.</li>
+          <li>DOMGuard then hides the hidden text it finds, and a screenshot of the page shows that change. Show Hidden Text outlines all four samples on this page. Protect all sites hides the near-color, tiny, and off-screen lines. A clipped line is outlined too, and Protect hides that clip when the words also look like an instruction.</li>
+        </ol>
+        <p><a class="store" href="https://chromewebstore.google.com/detail/domguard-hide-secrets-bef/abbelhilicbhdekpffocoojogdcjofkp">Add DOMGuard from the Chrome Web Store</a></p>
+      </section>
+
+      <section id="limits">
+        <h2>What DOMGuard can't do</h2>
+        <ul class="limits">
+          <li>It does not make an AI agent safe.</li>
+          <li>It cannot read words inside a picture.</li>
+          <li>It does not handle iframes or a closed shadow DOM.</li>
+          <li>Detection is a best effort. Look at the page again before you share it.</li>
+        </ul>
+      </section>
+  </main>
+  <footer class="foot">
+    <p class="nav">
+      <a href="index.html">DOMGuard</a>
+      <a href="privacy.html">Privacy Policy</a>
+      <a href="support.html">Support</a>
+    </p>
+  </footer>
+  <script src="vendor/gsap.min.js" defer></script>
+  <script type="module" src="demo-motion.js"></script>
+</body>
+</html>
