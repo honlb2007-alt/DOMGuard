@@ -10,4 +10,5 @@ npm-debug.log*
 .env
 .env.*
 !.env.example
-privacy-site/
+demo/chrome-profile/
+demo/out/

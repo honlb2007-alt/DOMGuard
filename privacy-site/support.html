@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DOMGuard Support</title>
+  <style>
+    body {
+      margin: 0;
+      background: #e8eaef;
+      color: #101114;
+      font: 17px/1.55 "Segoe UI", system-ui, sans-serif;
+    }
+    main {
+      max-width: 40rem;
+      margin: 0 auto;
+      padding: 48px 24px 64px;
+    }
+    h1 {
+      margin: 0 0 24px;
+      font-size: 32px;
+      line-height: 1.2;
+      font-weight: 650;
+    }
+    h2 {
+      margin: 32px 0 8px;
+      font-size: 18px;
+      font-weight: 650;
+    }
+    h3 {
+      margin: 24px 0 8px;
+      font-size: 16px;
+      font-weight: 650;
+    }
+    p, li {
+      margin: 0 0 12px;
+    }
+    ul, ol {
+      margin: 0 0 12px;
+      padding-left: 20px;
+    }
+    a {
+      color: #101114;
+    }
+    .nav {
+      margin: 0 0 32px;
+    }
+    .nav a {
+      margin-right: 16px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="nav">
+      <a href="index.html">DOMGuard</a>
+      <a href="privacy.html">Privacy Policy</a>
+    </p>
+    <h1>Support</h1>
+    <p>Email <a href="mailto:binlabs.studio@gmail.com">binlabs.studio@gmail.com</a>.</p>
+
+    <h2>Report a problem</h2>
+    <p>Include the Chrome version and the address of the page where it happened. Do not send a screenshot that contains a real key, a card number, or other personal information.</p>
+
+    <h2>Purchases</h2>
+    <p>To use a purchase on this browser, open DOMGuard and choose Restore purchase. It is under Upgrade, and in Settings while the plan says Free. Sign in with the email from checkout, then reopen DOMGuard.</p>
+    <p>For a purchase or payment question, write from the email you used at checkout. ExtensionPay and Stripe handle the payment.</p>
+
+    <h2>Troubleshooting</h2>
+
+    <h3>DOMGuard doesn't run on some pages</h3>
+    <p>Chrome does not allow extensions on chrome:// pages, the Chrome Web Store, the New Tab page, or the built-in PDF viewer. On those pages the popup says Chrome blocks extensions there.</p>
+
+    <h3>Protect all sites seems off</h3>
+    <p>The toolbar icon shows ON while Protect all sites is on. Open chrome://extensions, open DOMGuard's details, and confirm site access is allowed. In the popup, turn Protect all sites off, then turn it on again.</p>
+
+    <h3>A site looks broken or something disappeared</h3>
+    <p>In the popup, turn on "Disable on this site" for that website, or turn Protect all sites off. Write to <a href="mailto:binlabs.studio@gmail.com">binlabs.studio@gmail.com</a> with the address of the site. Do not attach a screenshot that contains a key, a card number, or other personal information.</p>
+
+    <h3>Screenshot isn't pasting</h3>
+    <p>A capture copies a PNG to the clipboard. The program you paste into has to accept a picture. If the page does not have focus, the automatic copy can fail, and the card on the page offers Copy. If copying is not available on that page, the card says to open a normal website and try again. An http page is a common case, because Chrome offers this clipboard write on a secure page.</p>
+
+    <h3>Shortcuts don't work</h3>
+    <p>Open chrome://extensions/shortcuts to see and change DOMGuard's keys. Another extension can use the same keys.</p>
+
+    <h3>Pro shows as Free or can't verify</h3>
+    <p>Check your connection. Open DOMGuard and choose Restore purchase. It is under Upgrade, and in Settings while the plan says Free. Sign in with the email from checkout, then close the popup and open it again.</p>
+
+    <h3>How to reset DOMGuard</h3>
+    <p>At chrome://extensions, remove DOMGuard and install it again. That restores the default settings. A purchase can be brought back with Restore purchase. On the extension's details page, Chrome may also offer a way to clear the extension's saved data. That returns settings to their defaults and leaves the extension installed.</p>
+
+    <h3>Known limitations</h3>
+    <ul>
+      <li>Protect all sites does not look inside iframes, and it cannot see a closed shadow tree.</li>
+      <li>Text with display: none is not treated as hidden text. It is not painted into a screenshot.</li>
+      <li>Detection is a best guess. It does not find every secret or every hidden instruction.</li>
+      <li>Text that uses a visual-hiding technique (a zero clip rectangle, clip-path inset(50%) or inset(100%), or a box no larger than 1px with overflow hidden) is hidden only when it matches an instruction phrase.</li>
+      <li>A screenshot is the visible area of the current tab.</li>
+      <li>After a refund, Pro can stay on until the next check. The in-memory result lasts up to 10 minutes. Protect all sites is checked again when the popup opens or the browser restarts.</li>
+    </ul>
+
+    <h2>Common questions</h2>
+    <ul>
+      <li>DOMGuard cannot run on chrome:// pages, the Chrome Web Store, the New Tab page, or the built-in PDF viewer. Chrome blocks extensions there.</li>
+      <li>A screenshot is the visible area of the current tab. It does not include the rest of a long page or another window.</li>
+      <li>Detection is best-effort. It does not promise to find every secret or every hidden instruction. Look at the page before you share it.</li>
+      <li>Change a shortcut at chrome://extensions/shortcuts. Find DOMGuard and type the keys you want.</li>
+      <li>To pause Protect all sites on one website, turn on "Disable on this site" in the popup while that site is open.</li>
+    </ul>
+  </main>
+</body>
+</html>

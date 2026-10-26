@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DOMGuard — Chrome extension for hidden text and screenshots</title>
+  <meta name="description" content="DOMGuard is a Chrome extension that finds hidden text and masks secrets before you take a screenshot or paste a page into an AI tool.">
+  <link rel="canonical" href="https://domguard-privacy.netlify.app/">
+  <meta property="og:title" content="DOMGuard — Chrome extension for hidden text and screenshots">
+  <meta property="og:description" content="Find hidden text and mask secrets on a page before a screenshot or a paste into an AI tool.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://domguard-privacy.netlify.app/">
+  <meta property="og:image" content="https://domguard-privacy.netlify.app/share.jpg">
+  <meta property="og:image:type" content="image/jpeg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="DOMGuard demo. A blank page, then a black bar that reads: TEST ONLY - case 1, hidden text for a demo.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="DOMGuard — Chrome extension for hidden text and screenshots">
+  <meta name="twitter:description" content="Find hidden text and mask secrets on a page before a screenshot or a paste into an AI tool.">
+  <meta name="twitter:image" content="https://domguard-privacy.netlify.app/share.jpg">
+  <meta name="twitter:image:alt" content="DOMGuard demo. A blank page, then a black bar that reads: TEST ONLY - case 1, hidden text for a demo.">
+  <style>
+    body {
+      margin: 0;
+      background: #e8eaef;
+      color: #101114;
+      font: 17px/1.55 "Segoe UI", system-ui, sans-serif;
+    }
+    main {
+      max-width: 40rem;
+      margin: 0 auto;
+      padding: 48px 24px 64px;
+    }
+    h1 {
+      margin: 16px 0 8px;
+      font-size: 32px;
+      line-height: 1.2;
+      font-weight: 650;
+    }
+    h2 {
+      margin: 32px 0 8px;
+      font-size: 18px;
+      font-weight: 650;
+    }
+    p, li {
+      margin: 0 0 12px;
+    }
+    ul {
+      margin: 0 0 12px;
+      padding-left: 20px;
+    }
+    a {
+      color: #101114;
+    }
+    img {
+      display: block;
+      width: 96px;
+      height: 96px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 0 0 12px;
+    }
+    th, td {
+      text-align: left;
+      padding: 8px;
+      border-bottom: 1px solid #101114;
+      vertical-align: top;
+    }
+    .btn {
+      display: inline-block;
+      margin: 8px 0 24px;
+      padding: 8px 16px;
+      background: #101114;
+      color: #e8eaef;
+      text-decoration: none;
+    }
+    .nav a {
+      margin-right: 16px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <img src="icon128.png" width="96" height="96" alt="DOMGuard">
+    <h1>DOMGuard</h1>
+    <p>Hide secrets and hidden text on a web page before you share a screenshot or paste the page into an AI tool.</p>
+    <p>Masks and hidden-text checks run in your browser. The picture you capture is copied to the clipboard.</p>
+    <a class="btn" href="https://chromewebstore.google.com/detail/domguard-hide-secrets-bef/abbelhilicbhdekpffocoojogdcjofkp">Add to Chrome</a>
+    <p><a href="hidden-text-demo.html">See what hidden text looks like</a></p>
+
+    <h2>What it does</h2>
+    <ul>
+      <li>Protect all sites hides hidden text as pages load and change, and can mask API keys, tokens, and card numbers. Emails and phone numbers stay off until you turn them on.</li>
+      <li>Manual picker covers one element you click. Auto Scan &amp; Mask covers keys, tokens, and card numbers on the current page. Card numbers are checked with the Luhn test.</li>
+      <li>Masks are solid black or blurred. Hold Alt to peek while automatic masks are on.</li>
+      <li>Capture area, a custom pixel size, or the visible area. A successful capture is copied to the clipboard.</li>
+      <li>Show Hidden Text lists hidden text on the page and marks a possible instruction to an AI. That mark is a heuristic.</li>
+    </ul>
+
+    <h2>Keyboard shortcuts</h2>
+    <p>These are the suggested keys in the extension manifest. You can change them at chrome://extensions/shortcuts. The popup and the welcome page show the keys Chrome currently has, including "Not set" when a command has none.</p>
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">Action</th>
+          <th scope="col">Suggested shortcut</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Turn Protect all sites on or off</td>
+          <td>Alt+Shift+P</td>
+        </tr>
+        <tr>
+          <td>Mask sensitive data on this page</td>
+          <td>Alt+Shift+M</td>
+        </tr>
+        <tr>
+          <td>Capture an area of the page</td>
+          <td>Ctrl+Shift+S (Command+Shift+S on Mac)</td>
+        </tr>
+        <tr>
+          <td>Open DOMGuard</td>
+          <td>Not set</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p class="nav">
+      <a href="privacy.html">Privacy Policy</a>
+      <a href="support.html">Support</a>
+    </p>
+  </main>
+</body>
+</html>

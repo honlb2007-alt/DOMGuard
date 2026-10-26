@@ -20,87 +20,66 @@ Hide API keys, emails and card numbers on any page, then copy a clean screenshot
 
 Description:
 
-Before you share your screen, post a screenshot, or paste a page into an AI tool, hide what should not leave your browser.
+Stop leaking secrets before you share a page or paste it into an AI tool.
 
-DOMGuard masks sensitive data on web pages and hides text that people can't see but AI tools might read.
-
-[MISMATCH: "Turn it on once and it keeps working on every site." Protect all sites is off until a paid install turns it on and Chrome grants optional access to all sites. It does not start on every site by itself.]
-
-PROTECT ALL SITES (PRO)
-
-- One switch for all websites. No need to turn it on page by page
-- Hides hidden text as pages load and change, so it keeps working while you scroll or switch pages
-- Optionally masks API keys, tokens and card numbers automatically. Emails and phone numbers can be added in settings
-- Hold Alt to peek at the original text while automatic masks are on
-- Turn it off for specific sites
-- All-sites access is requested only when a paid install turns this on, and turning it off removes that permission when nothing else needs it
-
-[MISMATCH: "Works with any screenshot or screen recording tool, including the ones built into your computer." DOMGuard does not record and does not connect to other capture tools. Hiding is a visual change on the page, and it is best-effort: iframes, closed shadow trees, and a burst over the time budget can leave text visible. A picture already copied is not changed.]
-
-[MISMATCH: "Hold Alt to peek at the original text while masks are on" is only partly true. The Alt listener is in `src/content/automask.ts`, which runs when Protect all sites has "Mask sensitive data" on. The manual picker does not listen for Alt by itself.]
+DOMGuard hides sensitive information on web pages, and can show text that people cannot see but an AI tool might still read.
 
 HIDE SENSITIVE DATA
 
 - Click any element on a page to hide it (free)
 - Choose a solid black or blurred mask
-- Auto Scan & Mask finds API keys (OpenAI, Anthropic, AWS, GitHub, Stripe), JWT tokens, card numbers and optionally emails and phone numbers (Pro)
+- Masks stay with the page as you scroll
+- Free: manual masking is not limited
+
+AUTO SCAN AND MASK (PRO)
+
+- One click finds API keys (OpenAI, Anthropic, AWS, GitHub, Stripe), JWT tokens, and card numbers, then covers them
+- Email addresses and phone numbers stay visible until you turn them on
+- Phone numbers cover international format and Taiwan mobile numbers
 - Card numbers are checked before masking to reduce false alarms
+- While automatic masks are on, hold Alt to peek at the original text
 
-SCREENSHOTS THAT JUST WORK
+SHOW HIDDEN TEXT (PRO)
 
-- Capture area, from the shortcut or the popup, lets you drag a rectangle. Releasing the drag copies the image when the page allows a clipboard write
-- Press that shortcut again while the tool is open to capture the visible area. That second press does not copy by itself
-- Capture a custom size by entering width and height in pixels
-- Capture the visible area from the toolbar popup
-- Paste with Ctrl+V on Windows or Command+V on Mac when the copy succeeded
+Some pages contain text people cannot see, such as near-invisible, tiny, or off-screen text, written to give instructions to AI tools. Show Hidden Text outlines where it is and lists what it says. A line that looks like an instruction to an AI is marked as a best guess, not a guarantee.
 
-[MISMATCH: "Press the shortcut, drag to select an area, and the image is already in your clipboard. Press Ctrl+V to paste it anywhere." A command shortcut does not give the page a user gesture, so the second press shows "Ready to copy" instead of copying. Clipboard write also fails on http pages and when the document is not focused. Mac paste is Command+V, not Ctrl+V.]
+PROTECT ALL SITES (PRO)
 
-SEE WHAT'S HIDDEN
+- One switch for the websites you visit. It stays off until you turn it on and allow access to all sites
+- Hides hidden text as pages load and change
+- Can also mask API keys, tokens, and card numbers automatically. Emails and phone numbers can be added in settings
+- You can pause it on specific sites
+- Hiding happens on the page. DOMGuard does not record your screen and does not connect to other capture tools. Text inside iframes, or inside closed parts of a page, can remain visible
 
-Some web pages contain text that people can't see, such as near-invisible, tiny or off-screen text, written to give instructions to AI tools. Show Hidden Text outlines where it is on the page and lists what it says, and flags text that looks like an instruction to an AI (a heuristic, not a guarantee).
+SCREENSHOTS
 
-[MISMATCH: this section does not say Show Hidden Text is Pro. `DETECT_HIDDEN_TEXT` is rejected with `PRO_REQUIRED` unless `isPro()` is true in the service worker.]
+Capture what you can see and copy it to the clipboard. Paste with Ctrl+V on Windows or Command+V on Mac. DOMGuard does not download or save the picture.
 
-KEYBOARD SHORTCUTS
-
-Suggested keys are the `commands` entries in `manifest.json`. The welcome page does not hardcode them. It fills the table from `chrome.commands.getAll()` and labels known commands in `src/shared/shortcuts.ts`. Until you change a shortcut, Chrome uses the suggested key. "Open DOMGuard" is the toolbar command Chrome reports as `_execute_action`. The manifest does not suggest a key for it, so the welcome page shows "Not set" until you set one.
-
-| Action | Default shortcut |
-| --- | --- |
-| Turn Protect all sites on or off | Alt+Shift+P |
-| Mask sensitive data on this page | Alt+Shift+M |
-| Capture an area of the page | Ctrl+Shift+S (Command+Shift+S on Mac) |
-| Open DOMGuard | Not set |
-
-You can change them at chrome://extensions/shortcuts
+- Drag a rectangle, or enter a width and height, to capture one area
+- Capture the visible area from the toolbar
+- Free: 3 plain screenshots per local day. These copies do not remove hidden text
+- Pro: unlimited screenshots. These hide hidden text and clean faint pixels before the copy
+- A shortcut capture may ask you to press Copy. Copying can fail on some pages
 
 PRIVATE BY DESIGN
 
-- Page content and screenshots are processed locally in your browser and never leave your device
+- Page content and screenshots are processed in your browser and are not uploaded
 - No analytics, no tracking
 - The only network connection is to ExtensionPay, to check Pro purchases
-- Minimal permissions, and DOMGuard only runs on the tab you activate unless you turn on Protect all sites
+- DOMGuard runs on the tab you open, unless you turn on Protect all sites
 
 PRICING
 
 Free to start. DOMGuard Pro is a one-time $4.99 purchase, with no subscription. Payments are handled by ExtensionPay and Stripe. ExtensionPay keeps the email used for your purchase. See the privacy policy for details.
 
-[MISMATCH: `$4.99` is the label in `src/popup/index.html`. This pass did not read the price configured at ExtensionPay. If that dashboard price differs, the popup label is wrong.]
-
-Free vs Pro, from the service worker and `FREE_DAILY_SCREENSHOTS`:
-
-- Free: manual picker, clear masks, and the black or blurred mask style. Capture visible area, Capture area, and custom size share 3 plain screenshots per local day. Those copies do not remove hidden text and do not run the pixel pass. The count is stored only after a successful clipboard write.
-- Pro: Protect all sites, Auto Scan & Mask (including the quick-mask shortcut), Show Hidden Text, and unlimited screenshots. Pro screenshots hide hidden text and run the pixel pass.
+After you pay, quit Chrome completely and open DOMGuard again. Stripe can stay on its receipt page, and that page does not refresh the extension. If the plan still says Free, choose Restore purchase, sign in with the email from checkout, then quit Chrome and open DOMGuard again.
 
 GOOD TO KNOW
 
 - Works on web pages in your browser only, not in other desktop apps
-- Chrome blocks extensions on chrome:// pages, the Chrome Web Store, the New Tab page and the built-in PDF viewer
-- Hidden text inside iframes and closed shadow roots is not covered
+- Chrome blocks extensions on chrome:// pages, the Chrome Web Store, the New Tab page, and the built-in PDF viewer
 - Screenshots cover the visible area of the current tab
-- Detection is best-effort. It can't guarantee that every secret or every hidden instruction is found, so always review your screen before sharing
-- Phone number detection covers international format (+ country code) and Taiwan mobile numbers
+- Detection is best-effort. It cannot guarantee that every secret or every hidden instruction is found. Review the screen before sharing
 
 ## Single purpose
 
@@ -151,10 +130,10 @@ On `test/injection-demo.html`:
 ## Mismatch list
 
 1. Summary and manifest description: "on any page" ignores pages Chrome blocks. "a clean screenshot" describes a Pro capture. Free captures are plain and limited to 3 per day.
-2. "Turn it on once and it keeps working on every site" is not the default. Protect all sites is a paid switch plus an optional permission.
-3. "Works with any screenshot or screen recording tool, including the ones built into your computer" overstates coverage. DOMGuard does not record, and hiding is best-effort.
-4. Alt peek runs from the automatic-mask script, not from the manual picker alone.
-5. A capture shortcut does not always leave the image on the clipboard, and Ctrl+V is not the paste key on Mac. http pages and an unfocused document cannot copy.
-6. Show Hidden Text is Pro. The feature paragraph did not say so.
-7. $4.99 is the popup label. The ExtensionPay dashboard price was not checked in this pass.
+2. The pasted description now says Protect all sites stays off until the user turns it on and allows access.
+3. The pasted description now says DOMGuard does not record and does not connect to other capture tools.
+4. Alt peek is described only while automatic masks are on.
+5. The pasted description says a shortcut capture may ask for Copy, and that copying can fail on some pages. Mac paste is Command+V.
+6. Show Hidden Text is labeled Pro.
+7. The ExtensionPay plan button shows $4.99 Lifetime, matching the popup label.
 8. The previous data-use form checks Website content and Financial and payment information. The extension does not transmit page content, screenshots, or card numbers.
